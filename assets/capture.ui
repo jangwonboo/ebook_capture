@@ -1,0 +1,599 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Dialog</class>
+ <widget class="QDialog" name="Dialog">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>480</width>
+    <height>1034</height>
+   </rect>
+  </property>
+  <property name="font">
+   <font>
+    <family>Arial</family>
+    <pointsize>-1</pointsize>
+   </font>
+  </property>
+  <property name="windowTitle">
+   <string>Ebook Companion</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">* {
+    font-size: 12px;
+}</string>
+  </property>
+  <widget class="QGroupBox" name="gb_options">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>10</y>
+     <width>461</width>
+     <height>356</height>
+    </rect>
+   </property>
+   <property name="title">
+    <string>Options</string>
+   </property>
+   <widget class="QLabel" name="lb_title">
+    <property name="geometry">
+     <rect>
+      <x>15</x>
+      <y>35</y>
+      <width>31</width>
+      <height>14</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Title</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="lb_pages">
+    <property name="geometry">
+     <rect>
+      <x>335</x>
+      <y>25</y>
+      <width>36</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Pages</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="le_title">
+    <property name="geometry">
+     <rect>
+      <x>75</x>
+      <y>30</y>
+      <width>236</width>
+      <height>21</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="le_folder">
+    <property name="geometry">
+     <rect>
+      <x>75</x>
+      <y>70</y>
+      <width>281</width>
+      <height>21</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLabel" name="lb_folder">
+    <property name="geometry">
+     <rect>
+      <x>15</x>
+      <y>70</y>
+      <width>46</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Folder</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="btn_region">
+    <property name="geometry">
+     <rect>
+      <x>285</x>
+      <y>105</y>
+      <width>76</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Region</string>
+    </property>
+    <property name="autoDefault">
+     <bool>false</bool>
+    </property>
+   </widget>
+   <widget class="QCheckBox" name="cb_pdf">
+    <property name="geometry">
+     <rect>
+      <x>165</x>
+      <y>195</y>
+      <width>71</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>PDF</string>
+    </property>
+   </widget>
+   <widget class="QCheckBox" name="cb_voice">
+    <property name="geometry">
+     <rect>
+      <x>75</x>
+      <y>265</y>
+      <width>151</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Audio</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="lb_capture_method">
+    <property name="geometry">
+     <rect>
+      <x>15</x>
+      <y>110</y>
+      <width>41</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Target</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="btn_save">
+    <property name="geometry">
+     <rect>
+      <x>10</x>
+      <y>310</y>
+      <width>96</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Save Options</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="btn_window">
+    <property name="enabled">
+     <bool>false</bool>
+    </property>
+    <property name="geometry">
+     <rect>
+      <x>75</x>
+      <y>105</y>
+      <width>76</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Window</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="btn_browse">
+    <property name="geometry">
+     <rect>
+      <x>370</x>
+      <y>65</y>
+      <width>76</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Browse...</string>
+    </property>
+   </widget>
+   <widget class="QSpinBox" name="sb_pages">
+    <property name="geometry">
+     <rect>
+      <x>375</x>
+      <y>30</y>
+      <width>71</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="alignment">
+     <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+    </property>
+    <property name="minimum">
+     <number>1</number>
+    </property>
+    <property name="maximum">
+     <number>10000</number>
+    </property>
+    <property name="value">
+     <number>1</number>
+    </property>
+    <property name="displayIntegerBase">
+     <number>10</number>
+    </property>
+   </widget>
+   <widget class="QCheckBox" name="cb_ocr">
+    <property name="geometry">
+     <rect>
+      <x>75</x>
+      <y>230</y>
+      <width>111</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Searchable PDF</string>
+    </property>
+   </widget>
+   <widget class="QComboBox" name="cb_ocr_lang_pri">
+    <property name="geometry">
+     <rect>
+      <x>235</x>
+      <y>230</y>
+      <width>101</width>
+      <height>26</height>
+     </rect>
+    </property>
+    <property name="layoutDirection">
+     <enum>Qt::LeftToRight</enum>
+    </property>
+    <property name="currentIndex">
+     <number>-1</number>
+    </property>
+    <property name="minimumContentsLength">
+     <number>0</number>
+    </property>
+   </widget>
+   <widget class="QComboBox" name="cb_voice_lang">
+    <property name="geometry">
+     <rect>
+      <x>235</x>
+      <y>265</y>
+      <width>211</width>
+      <height>26</height>
+     </rect>
+    </property>
+    <property name="layoutDirection">
+     <enum>Qt::LeftToRight</enum>
+    </property>
+   </widget>
+   <widget class="QComboBox" name="cb_ocr_lang_sec">
+    <property name="geometry">
+     <rect>
+      <x>345</x>
+      <y>230</y>
+      <width>101</width>
+      <height>26</height>
+     </rect>
+    </property>
+    <property name="layoutDirection">
+     <enum>Qt::LeftToRight</enum>
+    </property>
+    <property name="currentIndex">
+     <number>-1</number>
+    </property>
+   </widget>
+   <widget class="QLabel" name="lb_next">
+    <property name="geometry">
+     <rect>
+      <x>15</x>
+      <y>150</y>
+      <width>46</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Next</string>
+    </property>
+   </widget>
+   <widget class="QComboBox" name="cb_next">
+    <property name="geometry">
+     <rect>
+      <x>75</x>
+      <y>150</y>
+      <width>141</width>
+      <height>26</height>
+     </rect>
+    </property>
+    <property name="currentIndex">
+     <number>0</number>
+    </property>
+    <item>
+     <property name="text">
+      <string>Page Down</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>Page Right</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>Down</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>Right</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>Space</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>Enter</string>
+     </property>
+    </item>
+   </widget>
+   <widget class="QLabel" name="lb_interval">
+    <property name="geometry">
+     <rect>
+      <x>270</x>
+      <y>150</y>
+      <width>71</width>
+      <height>26</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Delay (sec)</string>
+    </property>
+   </widget>
+   <widget class="QDoubleSpinBox" name="sb_delay">
+    <property name="geometry">
+     <rect>
+      <x>365</x>
+      <y>150</y>
+      <width>86</width>
+      <height>26</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QCheckBox" name="cb_img">
+    <property name="geometry">
+     <rect>
+      <x>75</x>
+      <y>195</y>
+      <width>91</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Images</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="lb_output">
+    <property name="geometry">
+     <rect>
+      <x>15</x>
+      <y>190</y>
+      <width>46</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Output</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="btn_load">
+    <property name="geometry">
+     <rect>
+      <x>115</x>
+      <y>310</y>
+      <width>96</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Load Options</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="btn_nextpt">
+    <property name="geometry">
+     <rect>
+      <x>370</x>
+      <y>105</y>
+      <width>76</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Next Point</string>
+    </property>
+    <property name="autoDefault">
+     <bool>false</bool>
+    </property>
+   </widget>
+   <widget class="QComboBox" name="cb_win_titles">
+    <property name="geometry">
+     <rect>
+      <x>160</x>
+      <y>105</y>
+      <width>111</width>
+      <height>26</height>
+     </rect>
+    </property>
+    <property name="layoutDirection">
+     <enum>Qt::LeftToRight</enum>
+    </property>
+    <property name="currentIndex">
+     <number>-1</number>
+    </property>
+    <property name="minimumContentsLength">
+     <number>0</number>
+    </property>
+   </widget>
+   <zorder>lb_pages</zorder>
+   <zorder>le_title</zorder>
+   <zorder>le_folder</zorder>
+   <zorder>btn_region</zorder>
+   <zorder>cb_pdf</zorder>
+   <zorder>cb_voice</zorder>
+   <zorder>btn_save</zorder>
+   <zorder>btn_window</zorder>
+   <zorder>btn_browse</zorder>
+   <zorder>sb_pages</zorder>
+   <zorder>cb_ocr</zorder>
+   <zorder>cb_ocr_lang_pri</zorder>
+   <zorder>cb_voice_lang</zorder>
+   <zorder>cb_ocr_lang_sec</zorder>
+   <zorder>cb_next</zorder>
+   <zorder>lb_interval</zorder>
+   <zorder>sb_delay</zorder>
+   <zorder>cb_img</zorder>
+   <zorder>lb_folder</zorder>
+   <zorder>lb_next</zorder>
+   <zorder>lb_title</zorder>
+   <zorder>lb_capture_method</zorder>
+   <zorder>lb_output</zorder>
+   <zorder>btn_load</zorder>
+   <zorder>btn_nextpt</zorder>
+   <zorder>cb_win_titles</zorder>
+  </widget>
+  <widget class="QGroupBox" name="gb_progress">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>370</y>
+     <width>461</width>
+     <height>656</height>
+    </rect>
+   </property>
+   <property name="font">
+    <font>
+     <pointsize>-1</pointsize>
+    </font>
+   </property>
+   <property name="title">
+    <string>Progress</string>
+   </property>
+   <widget class="QProgressBar" name="pb_progress">
+    <property name="geometry">
+     <rect>
+      <x>10</x>
+      <y>120</y>
+      <width>156</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="value">
+     <number>24</number>
+    </property>
+   </widget>
+   <widget class="QGraphicsView" name="gv_preview">
+    <property name="geometry">
+     <rect>
+      <x>5</x>
+      <y>155</y>
+      <width>451</width>
+      <height>491</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="btn_start">
+    <property name="geometry">
+     <rect>
+      <x>300</x>
+      <y>115</y>
+      <width>71</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Start</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="btn_cancel">
+    <property name="geometry">
+     <rect>
+      <x>380</x>
+      <y>115</y>
+      <width>71</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Cancel</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="lb_time">
+    <property name="geometry">
+     <rect>
+      <x>205</x>
+      <y>120</y>
+      <width>76</width>
+      <height>26</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>left (EST)</string>
+    </property>
+    <property name="alignment">
+     <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+    </property>
+   </widget>
+   <widget class="QScrollArea" name="scrollArea">
+    <property name="geometry">
+     <rect>
+      <x>10</x>
+      <y>25</y>
+      <width>441</width>
+      <height>76</height>
+     </rect>
+    </property>
+    <property name="widgetResizable">
+     <bool>true</bool>
+    </property>
+    <widget class="QWidget" name="scrollAreaWidgetContents">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>0</y>
+       <width>439</width>
+       <height>74</height>
+      </rect>
+     </property>
+     <widget class="QPlainTextEdit" name="pte_status">
+      <property name="geometry">
+       <rect>
+        <x>0</x>
+        <y>1</y>
+        <width>441</width>
+        <height>76</height>
+       </rect>
+      </property>
+     </widget>
+    </widget>
+   </widget>
+  </widget>
+  <zorder>gb_progress</zorder>
+  <zorder>gb_options</zorder>
+ </widget>
+ <resources/>
+ <connections/>
+ <designerdata>
+  <property name="gridDeltaX">
+   <number>5</number>
+  </property>
+  <property name="gridDeltaY">
+   <number>5</number>
+  </property>
+  <property name="gridSnapX">
+   <bool>true</bool>
+  </property>
+  <property name="gridSnapY">
+   <bool>true</bool>
+  </property>
+  <property name="gridVisible">
+   <bool>true</bool>
+  </property>
+ </designerdata>
+</ui>

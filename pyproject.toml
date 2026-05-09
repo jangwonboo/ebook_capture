@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ebook-capture"
+version = "0.2.0"
+description = "Screen region capture for ebooks: PDF, OCR, optional Google TTS; CLI + PyQt5 GUI"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "PyQt5>=5.15",
+  "qt-material>=2.14",
+  "pandas>=1.5",
+  "pyautogui>=0.9",
+  "mss>=9.0.1",
+  "pygetwindow>=0.0.9",
+  "Pillow>=9.0",
+  "google-genai>=1.0",
+  "python-dotenv>=1.0",
+  "certifi>=2024.0",
+  "truststore>=0.10",
+  "PyPDF2>=3.0",
+  "reportlab>=4.0",
+]
+
+[project.optional-dependencies]
+voice = [
+  "google-cloud-texttospeech>=2.14",
+  "pydub>=0.25",
+]
+
+[project.scripts]
+ebook-capture = "ebook_capture:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "gui*", "assets*"]
+
+[tool.setuptools]
+py-modules = ["cli", "ebook_capture"]
+
+[tool.setuptools.package-data]
+assets = ["*"]

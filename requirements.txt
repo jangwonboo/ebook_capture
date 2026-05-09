@@ -1,0 +1,18 @@
+# Runtime (matches pyproject.toml)
+PyQt5>=5.15
+qt-material>=2.14
+pandas>=1.5
+pyautogui>=0.9
+mss>=9.0.1
+pygetwindow>=0.0.9
+Pillow>=9.0
+google-genai>=1.0
+python-dotenv>=1.0
+certifi>=2024.0
+truststore>=0.10
+PyPDF2>=3.0
+reportlab>=4.0
+
+# Optional: voice output
+# google-cloud-texttospeech>=2.14
+# pydub>=0.25

@@ -1,0 +1,391 @@
+# ebook_capture Transfer Context
+
+Use this file as a compact handoff for future chats or other projects. It summarizes the key architecture, implementation decisions, solved problems, and reusable patterns from this project.
+
+## Project Purpose
+
+`ebook_capture` captures ebook pages from a target screen/window, optionally extracts OCR text using Google Gemini, and builds either a normal image PDF or a searchable PDF. It is designed for Windows, RDP, multi-monitor, and corporate network environments.
+
+Current pipeline:
+
+```text
+Phase I   capture PNG
+Phase II  PNG -> OCR txt + OCR layout JSON (optional; searchable/text modes)
+Phase III PNG -> PDF (normal image PDF) OR OCR JSON + PNG -> searchable PDF
+Phase IV  optional TTS voice output
+```
+
+Main entry points:
+
+- `python -m ebook_capture capture ...`
+- `python -m ebook_capture gui`
+- `ebook-capture capture ...` after editable install
+
+Current layout:
+
+```text
+cli.py
+ebook_capture.py
+__main__.py
+core/
+  config.py
+  pipeline.py
+  google_ocr.py
+  searchable_pdf.py
+  screen_capture.py
+  windows_util.py
+  win32_bitmap_capture.py
+  tts.py
+gui/
+  app.py
+  snipping.py
+  theme.py
+  ui_capture.py
+assets/
+  default_config.json
+  ocr_lang.csv
+  voice_lang.csv
+```
+
+## Core Decisions
+
+Do not mix GUI and capture logic. The GUI collects options, writes a temporary config JSON, and runs the CLI in a subprocess using `QProcess`. The actual capture/OCR/PDF pipeline stays headless in `core/pipeline.py`.
+
+Do not store final outputs in `tmp`. The path standard is:
+
+```text
+output/{title}/tmp/{title}_{page:04d}.png
+output/{title}/tmp/{title}_{page:04d}.txt
+output/{title}/tmp/{title}_{page:04d}.ocr.json
+output/{title}/tmp/{title}_{page:04d}.searchable.pdf
+output/{title}/{title}.pdf
+output/{title}/{title}_ocr.txt
+output/{title}/{title}_voice.mp3
+output/{title}/capture_state.json
+```
+
+Long-running phases must be resumable. Per-page artifacts are written to `.part` first, then renamed atomically with `os.replace()`. Resume checks both manifest state and actual file validity.
+
+External API setup is centralized in `core/google_ocr.py`. Do not scatter `genai.Client(...)` calls across the codebase.
+
+## Capture Lessons
+
+Windows/RDP capture is tricky because different APIs report different coordinate systems:
+
+- `GetWindowRect`: outer frame including title bar/borders.
+- `GetClientRect`: client size in window-local coordinates.
+- `ClientToScreen`: converts client origin to screen coordinates.
+- `GetWindowInfo.rcClient`: screen-space client rect, but can reflect physical DPI-scaled dimensions.
+- RDP/MSTSC may expose a logical remote framebuffer that differs from the physical local window size.
+
+Backends:
+
+- `printwindow`: preferred for RDP/window capture. Captures the HWND client bitmap and often matches the RDP logical framebuffer.
+- `screen`: uses `mss` or `pyautogui` screen-region capture. Better for manual regions, but sensitive to DPI and multi-monitor coordinates.
+
+Important implementation notes:
+
+- Screen-region capture should set Windows DPI awareness before resolving physical screen coordinates.
+- PrintWindow capture should not force DPI awareness in the same way, because RDP logical and physical sizes can diverge.
+- For multi-monitor capture, prefer `mss`; fallback to `pyautogui.screenshot(..., allScreens=True)` on Windows.
+- Debug capture logs must include frame/client/crop rects and cursor position.
+- If images are black, first verify HWND/title/backend/rect/DPI. Do not hide the root cause with image trimming.
+
+Mouse cursor handling:
+
+- Some capture environments include the cursor in screenshots.
+- Option: `hide_cursor_during_capture`.
+- Implementation saves current cursor position, moves cursor outside capture rect just for screen capture, then restores it.
+- `PrintWindow` usually does not include the cursor, so this mainly matters for screen-region capture.
+
+## OCR and Searchable PDF
+
+Tesseract was removed. OCR uses Google Gemini through `google-genai`.
+
+Default model:
+
+```text
+gemini-2.5-flash
+```
+
+Override with:
+
+```env
+GOOGLE_OCR_MODEL=gemini-2.5-flash
+```
+
+Two OCR modes exist in `core/google_ocr.py`:
+
+- `extract_text_from_image(...)`: plain text OCR.
+- `extract_layout_from_image(...)`: text plus layout blocks for searchable PDF.
+
+Layout OCR output shape:
+
+```json
+{
+  "image_width": 853,
+  "image_height": 1440,
+  "text": "...",
+  "blocks": [
+    {
+      "text": "...",
+      "bbox": {"x": 0.12, "y": 0.08, "w": 0.74, "h": 0.03},
+      "confidence": 0.0
+    }
+  ]
+}
+```
+
+Rules:
+
+- `bbox` is normalized `0..1` relative to the full image.
+- OCR coordinates are top-left origin.
+- PDF coordinates are bottom-left origin, so conversion is required.
+- Prompt must request only valid JSON, no markdown fences.
+- JSON parsing should tolerate fenced output but fail clearly if no JSON object exists.
+- If layout JSON parsing keeps failing, fallback plain text OCR can still produce a coarse layout for searchable PDF continuity.
+
+Searchable PDF:
+
+- Implemented in `core/searchable_pdf.py`.
+- Uses `reportlab` to draw the original PNG as page background.
+- Adds invisible text layer with `textRenderMode(3)`.
+- Uses `PyPDF2` to merge per-page PDFs.
+- Final PDF path is `output/{title}/{title}.pdf`.
+- PDF page size now uses image DPI metadata (`dpi`) to preserve physical sizing across conversion.
+
+Normal PDF mode:
+
+- Also implemented in `core/searchable_pdf.py` (`build_page_image_pdf`).
+- Creates image-only page PDFs without OCR JSON.
+- Uses the same DPI-aware page-size conversion as searchable PDF.
+
+Known limitation:
+
+- Gemini bbox quality may not be as exact as dedicated OCR layout engines. The code is structured so a future Google Cloud Vision OCR layout extractor could replace the Gemini layout function while keeping the same `{text, blocks}` contract.
+
+## Google API, SSL, and Corporate Networks
+
+Secrets must not be hardcoded. Use `.env` or OS env vars.
+
+Minimum `.env`:
+
+```env
+GOOGLE_API_KEY=...
+GOOGLE_OCR_MODEL=gemini-2.5-flash
+GOOGLE_API_TRUST_MODE=auto
+```
+
+Trust modes:
+
+```text
+auto     OS trust store when available, otherwise certifi
+system   OS trust store only, recommended for corporate Windows/proxy
+certifi  public CA bundle only, recommended for open networks
+```
+
+Extra CA:
+
+```env
+GOOGLE_API_CA_BUNDLE=D:\path\company-ca.cer
+```
+
+Implementation details:
+
+- Uses `truststore` for Windows/system certificate store.
+- Falls back to `certifi`.
+- Supports PEM bundles and DER `.cer` exported from Windows.
+- DER `.cer` is converted using `ssl.DER_cert_to_PEM_cert()`.
+- Never use `verify=False` as a standard solution.
+
+Common errors:
+
+- `GOOGLE_API_KEY environment variable not set`: missing `.env` or env var.
+- `CERTIFICATE_VERIFY_FAILED`: use `GOOGLE_API_TRUST_MODE=system` or add `GOOGLE_API_CA_BUNDLE`.
+- `NO_CERTIFICATE_OR_CRL_FOUND`: CA file is not valid PEM or DER certificate.
+- `404 NOT_FOUND`: model name is stale. Update `GOOGLE_OCR_MODEL`.
+- `429`, quota, rate: reduce pages, retry later, check quota.
+
+## Resume Strategy
+
+Resume is based on file validation plus manifest.
+
+State file:
+
+```text
+output/{title}/capture_state.json
+```
+
+Example:
+
+```json
+{
+  "title": "Book",
+  "start_page": 1,
+  "n_pages": 100,
+  "phases": {
+    "capture": {"1": {"status": "done", "path": "..."}},
+    "ocr": {"1": {"status": "done", "path": "..."}},
+    "pdf": {"1": {"status": "done", "path": "..."}}
+  },
+  "errors": [],
+  "outputs": {
+    "final_pdf": "...",
+    "combined_txt": "...",
+    "final_voice": "..."
+  }
+}
+```
+
+Validation rules:
+
+- PNG must exist, be non-empty, and open/verify with Pillow.
+- TXT must exist.
+- OCR JSON must parse and contain a `blocks` list.
+- PDF/MP3 must exist and be non-empty.
+
+CLI patterns:
+
+```powershell
+python -m ebook_capture capture --config assets/default_config.json --pdf-image
+python -m ebook_capture capture --config assets/default_config.json --images
+python -m ebook_capture capture --config assets/default_config.json --text
+python -m ebook_capture capture --config assets/default_config.json --pdf-searchable
+python -m ebook_capture capture --config assets/default_config.json --output-mode pdf_searchable
+python -m ebook_capture capture --config assets/default_config.json --phase capture
+python -m ebook_capture capture --config assets/default_config.json --phase ocr
+python -m ebook_capture capture --config assets/default_config.json --phase pdf
+python -m ebook_capture capture --config assets/default_config.json --phase ocr --force-phase ocr
+python -m ebook_capture capture --config assets/default_config.json --no-resume
+```
+
+Mode defaults:
+
+- `title` default is `unknown` when omitted/blank.
+- default output mode is `pdf` (capture + normal image PDF, no OCR).
+
+Capture resume warning:
+
+- Capture phase is tied to the ebook viewer’s current page. If earlier pages are skipped, the viewer must already be positioned at the next page to capture.
+- OCR/PDF phases are file-based and safe to resume.
+
+## Logging Standards
+
+Logs are user-facing because GUI shows CLI stdout/stderr.
+
+Use stable prefixes:
+
+```text
+Phase I: capture PNG
+IMAGE_OK
+IMAGE_SKIP
+CAPTURE_RESUME_WARN
+Phase II: PNG -> TXT + OCR JSON (Google Gemini)
+OCR_TEXT_OK
+OCR_JSON_OK
+OCR_OK
+OCR_FAIL
+Phase III: searchable PDF
+PDF_PAGE_OK
+PDF_PAGE_SKIP
+PDF_OK
+PDF_FAIL
+VOICE_OK
+DEBUG_RECT
+DEBUG_CAPTURE
+```
+
+Never log:
+
+- API keys
+- `.env` contents
+- cert PEM/DER body
+- OAuth tokens
+- service account JSON body
+- full OCR text or huge JSON responses
+
+Debug logs should include values needed for reproduction, especially:
+
+- target window title
+- HWND
+- frame/client/crop rects
+- backend selection
+- image dimensions
+- cursor position
+- output paths
+
+## Useful Commands
+
+Install/update editable environment:
+
+```powershell
+pip install -e .
+```
+
+Help:
+
+```powershell
+python -m ebook_capture capture --help
+```
+
+Google client smoke test:
+
+```powershell
+python -c "from core.google_ocr import _client; print(type(_client()).__name__)"
+```
+
+Gemini call smoke test:
+
+```powershell
+python -c "from core.google_ocr import _client; c=_client(); r=c.models.generate_content(model='gemini-2.5-flash', contents='Reply with exactly: OK'); print((r.text or '').strip())"
+```
+
+Capture one page only:
+
+```powershell
+python -m ebook_capture capture --config assets/default_config.json --phase capture --debug-capture --debug-max-pages 1 --title smoke_capture
+```
+
+OCR existing PNGs:
+
+```powershell
+python -m ebook_capture capture --config assets/default_config.json --phase ocr --title smoke_capture
+```
+
+Build searchable PDF from existing PNG/OCR JSON:
+
+```powershell
+python -m ebook_capture capture --config assets/default_config.json --phase pdf --title smoke_capture
+```
+
+Compile check:
+
+```powershell
+python -m compileall "core" "gui" "cli.py"
+```
+
+## Reuse Checklist for Other Projects
+
+When transferring this knowledge to another project:
+
+- Copy the path helper pattern from `CaptureConfig`.
+- Keep external API code centralized.
+- Keep GUI and long-running work separated.
+- Use per-page artifacts.
+- Use `.part` atomic writes.
+- Use a manifest, but validate files too.
+- Add `--phase`, `--resume`, and `--force-phase`.
+- Keep SSL trust configurable with `auto`, `system`, `certifi`.
+- Support corporate CA files without disabling SSL verification.
+- Keep final outputs outside `tmp`.
+- Add logs with stable prefixes and no secrets.
+
+Do not copy:
+
+- `.env`
+- API keys
+- service account JSON
+- certificate files unless explicitly intended
+- user-specific window titles and output paths
+- `verify=False`
+- image trimming hacks that hide capture coordinate bugs

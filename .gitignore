@@ -1,0 +1,8 @@
+.env
+*.pyc
+__pycache__/
+.idea/
+.vscode/
+service_account.json
+certs/
+*.cer

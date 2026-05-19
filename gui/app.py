@@ -285,7 +285,7 @@ class CaptureDialog(QDialog):
         self.sb_page_count.setValue(1)
         self.cb_region_preset.setCurrentIndex(0)
 
-        self.ui.sb_delay.setValue(0.5)
+        self.ui.sb_delay.setValue(1.0)
 
         self.ui.cb_next.setCurrentIndex(0)
         self.ui.pb_progress.setValue(0)

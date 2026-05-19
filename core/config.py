@@ -96,7 +96,7 @@ class CaptureConfig:
     # Log window/crop coordinates; cap all phases to min(n_pages, debug_capture_max_pages).
     debug_capture: bool = False
     debug_capture_max_pages: int = 5
-    delay_sec: float = 0.3
+    delay_sec: float = 1.0
     next_key: str = "pagedown"
     capture_images: bool = True
     build_pdf: bool = True
@@ -299,7 +299,7 @@ class CaptureConfig:
             ),
             debug_capture=bool(data.get("debug_capture", False)),
             debug_capture_max_pages=int(data.get("debug_capture_max_pages", 5)),
-            delay_sec=float(data.get("delay_sec", 0.3)),
+            delay_sec=float(data.get("delay_sec", 1.0)),
             next_key=str(data.get("next_key", "pagedown")),
             capture_images=capture_images,
             build_pdf=build_pdf,

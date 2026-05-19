@@ -88,7 +88,7 @@ flowchart TD
 - `--pages`, `--base-dir` 필요. `--title`은 생략 가능하며 기본값 `unknown` 사용.
 - `capture` phase를 실행할 때는 `--left`, `--top`, `--width`, `--height`도 필요.
 - 선택값 기본:
-  - `--delay` 없음 → `delay_sec = 0.3`
+  - `--delay` 없음 → `delay_sec = 1.0`
   - `--next-key` 없음 → `"pagedown"`
   - `--pdf-image` / `--images` / `--text` / `--pdf-searchable` / `--audio` 로 출력 모드 선택
   - 기본 출력 모드는 `--pdf-image` (`output_mode=pdf_image`)
@@ -155,7 +155,7 @@ flowchart TD
 
 - `assets/ocr_lang.csv` → OCR 언어 힌트 콤보 (`lang` 표시, `code` 는 `_ocr_code()` 로 조회).
 - `voice_lang.csv` → 음성 콤보 (`desc` 표시, 선택 행에서 `code`, `model`, `gender` 추출).
-- 기본값: OCR 은 `code == eng` 인 행으로 인덱스 설정, 음성은 첫 항목, 폴더 `D:/`, 딜레이 `0.3`, 이미지·PDF 체크 온.
+- 기본값: OCR 은 `code == eng` 인 행으로 인덱스 설정, 음성은 첫 항목, 폴더 `D:/`, 딜레이 `1.0`, 이미지·PDF 체크 온.
 
 ### 5.3 영역 선택 (`_pick_region`)
 

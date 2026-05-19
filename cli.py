@@ -460,7 +460,7 @@ def _cmd_capture(args: argparse.Namespace) -> int:
             hide_cursor_during_capture=bool(
                 getattr(args, "hide_cursor_during_capture", False)
             ),
-            delay_sec=float(args.delay_sec if args.delay_sec is not None else 0.3),
+            delay_sec=float(args.delay_sec if args.delay_sec is not None else 1.0),
             next_key=str(args.next_key if args.next_key is not None else "pagedown"),
             capture_images=args.capture_images,
             build_pdf=args.build_pdf,

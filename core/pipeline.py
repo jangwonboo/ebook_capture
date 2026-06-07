@@ -64,7 +64,7 @@ def _activate_target(cfg: CaptureConfig) -> None:
 
 
 def _send_page_turn_key(cfg: CaptureConfig, progress: ProgressFn | None) -> None:
-    """Foreground browser/tab and send next_key (SendInput; optional upper reader tap)."""
+    """Activate target window, focus clicks, then send next_key."""
     if cfg.capture_mode == CAPTURE_MANUAL:
         pyautogui.press(cfg.next_key)
         return
@@ -77,7 +77,7 @@ def _send_page_turn_key(cfg: CaptureConfig, progress: ProgressFn | None) -> None
         title=cfg.target_window_title,
         prefer_foreground=cfg.prefer_foreground_window_match,
         capture_rect=(left, top, w, h),
-        reader_focus_y_ratio=cfg.reader_focus_y_ratio,
+        reader_focus_clicks=cfg.reader_focus_clicks,
     )
     _emit(progress, f"TARGET_KEY_SENT key={cfg.next_key!r} ok={ok} {detail}")
 

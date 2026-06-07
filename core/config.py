@@ -90,7 +90,7 @@ class CaptureConfig:
     debug_capture_max_pages: int = 5
     delay_sec: float = 1.0
     next_key: str = "pagedown"
-    reader_focus_y_ratio: float = 0.35
+    reader_focus_clicks: int = 2
     output_mode: str = OUTPUT_PDF
     skip_capture: bool = False
     resume: bool = True
@@ -247,6 +247,8 @@ class CaptureConfig:
             raise ValueError(
                 "force_phase must be one of: '', capture, ocr, pdf, all"
             )
+        if self.reader_focus_clicks < 0 or self.reader_focus_clicks > 5:
+            raise ValueError("reader_focus_clicks must be between 0 and 5")
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> CaptureConfig:
@@ -279,7 +281,7 @@ class CaptureConfig:
             debug_capture_max_pages=int(data.get("debug_capture_max_pages", 5)),
             delay_sec=float(data.get("delay_sec", 1.0)),
             next_key=str(data.get("next_key", "pagedown")),
-            reader_focus_y_ratio=float(data.get("reader_focus_y_ratio", 0.35)),
+            reader_focus_clicks=int(data.get("reader_focus_clicks", 2)),
             output_mode=_output_mode_from_mapping(data),
             skip_capture=bool(data.get("skip_capture", False)),
             resume=bool(data.get("resume", True)),

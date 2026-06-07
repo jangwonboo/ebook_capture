@@ -210,6 +210,11 @@ _VK_BY_KEY: dict[str, int] = {
     "return": 0x0D,
 }
 
+_GA_ROOT = 2
+_WM_KEYDOWN = 0x0100
+_WM_KEYUP = 0x0101
+_EXTENDED_VKS = frozenset({0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28})
+
 
 class _KEYBDINPUT(ctypes.Structure):
     _fields_ = [
@@ -299,33 +304,133 @@ def _sendinput_vk(vk: int) -> bool:
         return False
     user32, _ = _win32_modules()
     INPUT_KEYBOARD = 1
+    KEYEVENTF_EXTENDEDKEY = 0x0001
     KEYEVENTF_KEYUP = 0x0002
+    KEYEVENTF_SCANCODE = 0x0008
     extra = ctypes.c_ulong(0)
     extra_ptr = ctypes.pointer(extra)
     inputs = (_INPUT * 2)()
     inputs[0].type = INPUT_KEYBOARD
-    inputs[0].ii.ki = _KEYBDINPUT(vk, 0, 0, 0, extra_ptr)
     inputs[1].type = INPUT_KEYBOARD
-    inputs[1].ii.ki = _KEYBDINPUT(vk, 0, KEYEVENTF_KEYUP, 0, extra_ptr)
+    if vk in _EXTENDED_VKS:
+        scan = int(user32.MapVirtualKeyW(vk, 0)) & 0xFF
+        inputs[0].ii.ki = _KEYBDINPUT(
+            0, scan, KEYEVENTF_SCANCODE | KEYEVENTF_EXTENDEDKEY, 0, extra_ptr
+        )
+        inputs[1].ii.ki = _KEYBDINPUT(
+            0,
+            scan,
+            KEYEVENTF_SCANCODE | KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP,
+            0,
+            extra_ptr,
+        )
+    else:
+        inputs[0].ii.ki = _KEYBDINPUT(vk, 0, 0, 0, extra_ptr)
+        inputs[1].ii.ki = _KEYBDINPUT(vk, 0, KEYEVENTF_KEYUP, 0, extra_ptr)
     sent = int(user32.SendInput(2, ctypes.byref(inputs[0]), ctypes.sizeof(_INPUT)))
     return sent == 2
 
 
-def _reader_focus_tap(
+def _root_hwnd(hwnd: int) -> int:
+    if sys.platform != "win32" or hwnd <= 0:
+        return hwnd
+    user32, _ = _win32_modules()
+    root = int(user32.GetAncestor(hwnd, _GA_ROOT))
+    return root if root else hwnd
+
+
+def _keyboard_target_hwnd(top_hwnd: int) -> int:
+    return find_browser_content_hwnd(top_hwnd) or top_hwnd
+
+
+def _keydown_lparam(vk: int) -> int:
+    user32, _ = _win32_modules()
+    scan = int(user32.MapVirtualKeyW(vk, 0)) & 0xFF
+    lp = 1 | (scan << 16)
+    if vk in _EXTENDED_VKS:
+        lp |= 1 << 24
+    return lp
+
+
+def _keyup_lparam(vk: int) -> int:
+    return _keydown_lparam(vk) | (1 << 30) | (1 << 31)
+
+
+def _postmessage_vk(hwnd: int, vk: int) -> bool:
+    if sys.platform != "win32" or hwnd <= 0:
+        return False
+    user32, _ = _win32_modules()
+    lp_down = _keydown_lparam(vk)
+    lp_up = _keyup_lparam(vk)
+    ok_down = bool(user32.PostMessageW(hwnd, _WM_KEYDOWN, vk, lp_down))
+    time.sleep(0.02)
+    ok_up = bool(user32.PostMessageW(hwnd, _WM_KEYUP, vk, lp_up))
+    return ok_down and ok_up
+
+
+def _send_vk_attached(target_hwnd: int, vk: int) -> bool:
+    """SetFocus on target (same thread) then SendInput — no mouse click."""
+    if sys.platform != "win32" or target_hwnd <= 0:
+        return False
+    user32, kernel32 = _win32_modules()
+    top = _root_hwnd(target_hwnd)
+    if not force_foreground_hwnd(top):
+        return False
+    target_thread = user32.GetWindowThreadProcessId(target_hwnd, None)
+    current_thread = kernel32.GetCurrentThreadId()
+    attached = bool(user32.AttachThreadInput(current_thread, target_thread, True))
+    try:
+        user32.SetFocus(target_hwnd)
+        time.sleep(0.05)
+        return _sendinput_vk(vk)
+    finally:
+        if attached:
+            user32.AttachThreadInput(current_thread, target_thread, False)
+
+
+def _reader_focus_clicks(
     left: int,
     top: int,
     width: int,
     height: int,
-    y_ratio: float,
+    *,
+    count: int = 2,
+    gap_sec: float = 0.06,
 ) -> tuple[int, int]:
-    """Tap upper reader body (not bottom status bar) so the tab accepts keyboard."""
+    """Two short single clicks at reader center (not a double-click)."""
     import pyautogui
 
     x = left + max(1, width // 2)
-    y = top + max(1, int(height * max(0.05, min(y_ratio, 0.45))))
-    pyautogui.click(x, y)
-    time.sleep(0.08)
+    y = top + max(1, height // 2)
+    clicks = max(0, int(count))
+    for idx in range(clicks):
+        pyautogui.click(x, y)
+        if idx + 1 < clicks:
+            time.sleep(gap_sec)
     return x, y
+
+
+def _deliver_vk_to_window(top_hwnd: int, vk: int, key_name: str) -> tuple[bool, str]:
+    """Deliver one key to the reader window without mouse click."""
+    target = _keyboard_target_hwnd(top_hwnd)
+    content_hwnd = target != top_hwnd
+
+    # Chrome/Edge renderer: PostMessage with extended lParam is most reliable.
+    if content_hwnd and _postmessage_vk(target, vk):
+        return True, f"via=PostMessage target=0x{target:x}"
+
+    if _send_vk_attached(target, vk):
+        return True, f"via=SendInput target=0x{target:x}"
+
+    if _postmessage_vk(target, vk):
+        return True, f"via=PostMessage target=0x{target:x}"
+    if content_hwnd and _postmessage_vk(top_hwnd, vk):
+        return True, f"via=PostMessage top=0x{top_hwnd:x}"
+
+    import pyautogui
+
+    pyautogui.press(key_name)
+    return True, "via=pyautogui_fallback"
 
 
 def send_page_turn_key(
@@ -335,9 +440,9 @@ def send_page_turn_key(
     title: str = "",
     prefer_foreground: bool = True,
     capture_rect: tuple[int, int, int, int] | None = None,
-    reader_focus_y_ratio: float = 0.15,
+    reader_focus_clicks: int = 2,
 ) -> tuple[bool, str]:
-    """Foreground target window/tab and send ``key`` (SendInput). Returns (ok, log detail)."""
+    """Activate window, optional center focus clicks, then send ``key``."""
     if sys.platform != "win32":
         return False, "not Windows"
     vk = _vk_for_key(key)
@@ -345,37 +450,41 @@ def send_page_turn_key(
         return False, f"unknown key {key!r}"
 
     try:
-        hwnd = (
-            pinned_hwnd
-            if pinned_hwnd > 0
-            else resolve_target_hwnd(title, prefer_foreground=prefer_foreground)
-        )
+        if pinned_hwnd > 0:
+            top_hwnd = pinned_hwnd
+        elif title.strip():
+            if not activate_window_title(title, prefer_foreground=prefer_foreground):
+                return False, f"activate failed title={title!r}"
+            top_hwnd = resolve_target_hwnd(title, prefer_foreground=prefer_foreground)
+        else:
+            return False, "no pinned_hwnd or title"
     except Exception as ex:
-        return False, f"resolve hwnd failed: {ex}"
+        return False, f"activate failed: {ex}"
 
-    if not focus_window_for_keyboard(hwnd):
-        return False, f"foreground failed hwnd=0x{hwnd:x}"
+    if not force_foreground_hwnd(_root_hwnd(top_hwnd)):
+        return False, f"foreground failed top=0x{top_hwnd:x}"
 
-    parts = [f"hwnd=0x{hwnd:x}", f"foreground={foreground_window_title()!r}"]
+    focus_note = ""
+    if reader_focus_clicks > 0 and capture_rect is not None:
+        left, top, width, height = capture_rect
+        if width > 0 and height > 0:
+            fx, fy = _reader_focus_clicks(
+                left, top, width, height, count=reader_focus_clicks
+            )
+            focus_note = f"focus_clicks={reader_focus_clicks}@({fx},{fy})"
+            time.sleep(0.05)
 
-    if reader_focus_y_ratio > 0 and capture_rect is not None:
-        l, t, w, h = capture_rect
-        if w > 0 and h > 0:
-            tx, ty = _reader_focus_tap(l, t, w, h, reader_focus_y_ratio)
-            parts.append(f"reader_tap=({tx},{ty}) y_ratio={reader_focus_y_ratio}")
-
+    time.sleep(0.08)
     key_name = str(key).strip().lower()
-    via = "SendInput"
-    if _sendinput_vk(vk):
-        parts.append(f"vk=0x{vk:02x}")
-    else:
-        import pyautogui
-
-        pyautogui.press(key_name)
-        via = "pyautogui"
-        parts.append("SendInput_fallback")
-
-    return True, "; ".join(parts + [f"via={via}"])
+    ok, via = _deliver_vk_to_window(top_hwnd, vk, key_name)
+    parts = [
+        f"top=0x{top_hwnd:x}",
+        f"foreground={foreground_window_title()!r}",
+    ]
+    if focus_note:
+        parts.append(focus_note)
+    parts.extend([via, f"vk=0x{vk:02x}"])
+    return ok, "; ".join(parts)
 
 
 def resolve_target_hwnd(title: str, *, prefer_foreground: bool = True) -> int:

@@ -28,10 +28,8 @@ from core.config import (
     CAPTURE_WINDOW_RIGHT_THIRD,
     CaptureConfig,
     DEFAULT_BOOK_TITLE,
-    OUTPUT_AUDIO,
     OUTPUT_IMAGES,
-    OUTPUT_PDF_IMAGE,
-    OUTPUT_PDF_SEARCHABLE,
+    OUTPUT_PDF,
     OUTPUT_TEXT,
     Rect,
     WINDOW_CAPTURE_PRINTWINDOW,
@@ -59,11 +57,15 @@ PRESET_MODES = (
 )
 
 OUTPUT_MODE_ITEMS = (
-    ("Images only", OUTPUT_IMAGES),
-    ("PDF (image)", OUTPUT_PDF_IMAGE),
+    ("Images", OUTPUT_IMAGES),
+    ("PDF", OUTPUT_PDF),
     ("Text (OCR)", OUTPUT_TEXT),
-    ("PDF (searchable)", OUTPUT_PDF_SEARCHABLE),
-    ("Audio (TTS from OCR)", OUTPUT_AUDIO),
+)
+
+ASSEMBLE_STYLE_ITEMS = (
+    ("Full book markdown", "full"),
+    ("Prose only (LLM)", "prose"),
+    ("Raw OCR (debug)", "raw"),
 )
 
 _CAPTURE_UI_SHIFT = 118
@@ -104,9 +106,10 @@ class CaptureDialog(QDialog):
         self._debug_capture_max_pages = 5
         self._window_capture_backend = WINDOW_CAPTURE_PRINTWINDOW
         self._hide_cursor_during_capture = False
+        self._ocr_text_prompt = ""
+        self._ocr_prompt_file = ""
 
         self._df_ocr = pd.read_csv(_assets_dir() / "ocr_lang.csv")
-        self._df_voice = pd.read_csv(_assets_dir() / "voice_lang.csv")
 
         self.ui.cb_ocr_lang_pri.clear()
         self.ui.cb_ocr_lang_sec.clear()
@@ -114,9 +117,8 @@ class CaptureDialog(QDialog):
             self.ui.cb_ocr_lang_pri.addItem(str(lang))
             self.ui.cb_ocr_lang_sec.addItem(str(lang))
 
-        self.ui.cb_voice_lang.clear()
-        for desc in self._df_voice["desc"]:
-            self.ui.cb_voice_lang.addItem(str(desc))
+        self.ui.cb_voice.hide()
+        self.ui.cb_voice_lang.hide()
 
         self.ui.lb_pages.hide()
         self.ui.sb_pages.hide()
@@ -191,6 +193,18 @@ class CaptureDialog(QDialog):
         self.ui.cb_ocr_lang_pri.setGeometry(235, 230, 101, 26)
         self.ui.cb_ocr_lang_sec.setGeometry(345, 230, 101, 26)
 
+        self.lb_assemble_style = QLabel("Markdown", self.ui.gb_options)
+        self.lb_assemble_style.setGeometry(15, 265, 56, 21)
+        self.cb_assemble_style = QComboBox(self.ui.gb_options)
+        self.cb_assemble_style.setGeometry(75, 260, 371, 26)
+        for label, value in ASSEMBLE_STYLE_ITEMS:
+            self.cb_assemble_style.addItem(label, value)
+
+        self.btn_assemble = QPushButton("Assemble MD", self.ui.gb_progress)
+        self.btn_assemble.setGeometry(170, 115, 118, 31)
+        self.ui.btn_start.setGeometry(295, 115, 71, 31)
+        self.ui.btn_cancle.setGeometry(375, 115, 76, 31)
+
         self._refresh_window_list(quiet=True)
         self._apply_defaults()
         self._on_preset_changed()
@@ -201,6 +215,7 @@ class CaptureDialog(QDialog):
         self.ui.btn_save.clicked.connect(self._save_options)
         self.ui.btn_load.clicked.connect(self._load_options)
         self.ui.btn_start.clicked.connect(self._start_capture)
+        self.btn_assemble.clicked.connect(self._start_assemble)
         self.ui.btn_cancle.clicked.connect(self._cancel_job)
 
         self.setWindowTitle("Ebook Capture")
@@ -231,7 +246,7 @@ class CaptureDialog(QDialog):
 
     def _on_output_mode_changed(self, *_args: object) -> None:
         mode = self.cb_output_mode.currentData()
-        needs_ocr = mode in {OUTPUT_TEXT, OUTPUT_PDF_SEARCHABLE, OUTPUT_AUDIO}
+        needs_ocr = mode == OUTPUT_TEXT
         self.lb_ocr_lang.setVisible(needs_ocr)
         self.ui.cb_ocr_lang_pri.setVisible(needs_ocr)
         self.ui.cb_ocr_lang_sec.setVisible(needs_ocr)
@@ -251,6 +266,7 @@ class CaptureDialog(QDialog):
                     "• Manual: Region → drag rectangle.\n"
                     "• Window: Refresh windows → pick app → full or left/right third.\n"
                     "• Set Start page # and Page count, then Start.\n"
+                    "• After OCR: Assemble MD builds {title}.md from tmp/*.ocr.json.\n"
                 )
                 return
             except (OSError, json.JSONDecodeError, ValueError):
@@ -266,20 +282,10 @@ class CaptureDialog(QDialog):
                 self.ui.cb_ocr_lang_sec.setCurrentIndex(i)
                 break
 
-        for i in range(len(self._df_voice)):
-            row = self._df_voice.iloc[i]
-            if str(row["code"]).startswith("en-US") and "Female" in str(row["desc"]):
-                self.ui.cb_voice_lang.setCurrentIndex(i)
-                break
-
-        self.ui.cb_img.setChecked(True)
-        self.ui.cb_pdf.setChecked(True)
-        self.ui.cb_ocr.setChecked(False)
-        self._set_output_mode(OUTPUT_PDF_IMAGE)
-        self.ui.cb_voice.setChecked(False)
-
         self.ui.le_folder.setText(_default_output_base())
         self.ui.le_title.clear()
+        self._set_output_mode(OUTPUT_PDF)
+        self._set_assemble_style("full")
 
         self.sb_start_page.setValue(1)
         self.sb_page_count.setValue(1)
@@ -322,6 +328,8 @@ class CaptureDialog(QDialog):
         self._debug_capture_max_pages = max(1, int(cfg.debug_capture_max_pages))
         self._window_capture_backend = cfg.window_capture_backend
         self._hide_cursor_during_capture = cfg.hide_cursor_during_capture
+        self._ocr_text_prompt = cfg.ocr_text_prompt
+        self._ocr_prompt_file = cfg.ocr_prompt_file
 
         tw = (cfg.target_window_title or "").strip()
         if tw:
@@ -335,11 +343,8 @@ class CaptureDialog(QDialog):
         self._on_preset_changed()
         self.ui.sb_delay.setValue(float(cfg.delay_sec))
         self.ui.cb_next.setCurrentIndex(_next_key_to_index(cfg.next_key))
-        self.ui.cb_img.setChecked(cfg.capture_images)
-        self.ui.cb_pdf.setChecked(cfg.build_pdf)
-        self.ui.cb_ocr.setChecked(cfg.ocr)
         self._set_output_mode(cfg.output_mode)
-        self.ui.cb_voice.setChecked(cfg.voice)
+        self._set_assemble_style(cfg.assemble_style)
 
         pri_code = cfg.ocr_lang
         found_pri = False
@@ -356,22 +361,6 @@ class CaptureDialog(QDialog):
                     self.ui.cb_ocr_lang_sec.setCurrentIndex(i)
                     break
 
-        found_voice = False
-        for i in range(len(self._df_voice)):
-            if (
-                str(self._df_voice.iloc[i]["code"]) == cfg.voice_lang_code
-                and str(self._df_voice.iloc[i]["model"]) == cfg.voice_model
-            ):
-                self.ui.cb_voice_lang.setCurrentIndex(i)
-                found_voice = True
-                break
-        if not found_voice:
-            for i in range(len(self._df_voice)):
-                row = self._df_voice.iloc[i]
-                if str(row["code"]).startswith("en-US") and "Female" in str(row["desc"]):
-                    self.ui.cb_voice_lang.setCurrentIndex(i)
-                    break
-
         r = cfg.rect
         if r.width >= 2 and r.height >= 2:
             self._rect_norm = QRect(r.left, r.top, r.width, r.height)
@@ -386,6 +375,14 @@ class CaptureDialog(QDialog):
                 return
         self.cb_output_mode.setCurrentIndex(1)
         self._on_output_mode_changed()
+
+    def _set_assemble_style(self, style: str) -> None:
+        style = (style or "full").strip().lower()
+        for i in range(self.cb_assemble_style.count()):
+            if self.cb_assemble_style.itemData(i) == style:
+                self.cb_assemble_style.setCurrentIndex(i)
+                return
+        self.cb_assemble_style.setCurrentIndex(0)
 
     def _pick_region(self) -> None:
         loop = QEventLoop()
@@ -486,13 +483,12 @@ class CaptureDialog(QDialog):
         next_key = NEXT_KEY_BY_INDEX[max(0, min(idx, len(NEXT_KEY_BY_INDEX) - 1))]
         pri = self.ui.cb_ocr_lang_pri.currentText()
         ocr_lang = self._ocr_code(pri) if pri else "eng"
-        v_lang, v_model, v_gender = self._voice_params()
 
         tw = self.cb_target_window.currentText().strip()
         if tw.startswith("("):
             tw = ""
 
-        output_mode = str(self.cb_output_mode.currentData() or OUTPUT_PDF_IMAGE)
+        output_mode = str(self.cb_output_mode.currentData() or OUTPUT_PDF)
         cfg = CaptureConfig(
             title=self.ui.le_title.text().strip() or DEFAULT_BOOK_TITLE,
             n_pages=int(self.sb_page_count.value()),
@@ -512,28 +508,16 @@ class CaptureDialog(QDialog):
             output_mode=output_mode,
             resume=True,
             ocr_lang=ocr_lang,
-            voice=self.ui.cb_voice.isChecked(),
-            voice_lang_code=v_lang,
-            voice_model=v_model,
-            voice_gender=v_gender,
+            ocr_text_prompt=self._ocr_text_prompt,
+            ocr_prompt_file=self._ocr_prompt_file,
+            assemble_style=str(self.cb_assemble_style.currentData() or "full"),
         )
-        cfg.apply_output_mode()
+        cfg.normalize()
         return cfg
 
     def _ocr_code(self, combo_text: str) -> str:
         row = self._df_ocr.loc[self._df_ocr["lang"] == combo_text]
         return str(row["code"].iloc[0])
-
-    def _voice_params(self) -> tuple[str, str, str]:
-        desc = self.ui.cb_voice_lang.currentText()
-        if not desc:
-            return "en-US", "en-US-Wavenet-C", "FEMALE"
-        row = self._df_voice.loc[self._df_voice["desc"] == desc].iloc[0]
-        return (
-            str(row["code"]),
-            str(row["model"]),
-            str(row["gender"]),
-        )
 
     def _build_config(self) -> CaptureConfig | None:
         pi = self.cb_region_preset.currentIndex()
@@ -596,6 +580,18 @@ class CaptureDialog(QDialog):
             )
         return cfg
 
+    def _assemble_preflight(self, cfg: CaptureConfig) -> str | None:
+        base = Path(cfg.base_dir).expanduser()
+        if not base.is_absolute():
+            return "Use an absolute output folder (Browse… or full path)."
+        tmp = cfg.tmp_dir()
+        if not tmp.is_dir():
+            return f"OCR folder not found:\n{tmp}"
+        pattern = f"{cfg.title}_*.ocr.json"
+        if not any(tmp.glob(pattern)):
+            return f"No OCR JSON matching {pattern} in:\n{tmp}"
+        return None
+
     def _python_env(self) -> QProcessEnvironment:
         env = QProcessEnvironment.systemEnvironment()
         root = str(_repo_root())
@@ -604,8 +600,29 @@ class CaptureDialog(QDialog):
         env.insert("PYTHONPATH", merged)
         return env
 
+    def _job_running(self) -> bool:
+        return self._proc is not None and self._proc.state() != QProcess.NotRunning
+
+    def _start_subprocess(self, arguments: list[str], *, label: str) -> None:
+        if self._job_running():
+            QMessageBox.information(self, "Busy", "A job is already running.")
+            return
+
+        self._proc = QProcess(self)
+        self._proc.setProcessEnvironment(self._python_env())
+        self._proc.setProgram(sys.executable)
+        self._proc.setArguments(arguments)
+        self._proc.readyReadStandardOutput.connect(self._read_stdout)
+        self._proc.readyReadStandardError.connect(self._read_stderr)
+        self._proc.finished.connect(self._on_finished)
+
+        self.ui.pb_progress.setRange(0, 0)
+        self.ui.lb_time.setText("Running…")
+        self.ui.pte_status.appendPlainText(f"Starting {label}…\n")
+        self._proc.start()
+
     def _start_capture(self) -> None:
-        if self._proc is not None and self._proc.state() != QProcess.NotRunning:
+        if self._job_running():
             QMessageBox.information(self, "Busy", "A capture job is already running.")
             return
         cfg = self._build_config()
@@ -621,21 +638,37 @@ class CaptureDialog(QDialog):
         os.close(fd)
         cfg.to_json_file(path)
         self._job_config_path = path
-
-        self._proc = QProcess(self)
-        self._proc.setProcessEnvironment(self._python_env())
-        self._proc.setProgram(sys.executable)
-        self._proc.setArguments(
-            ["-m", "ebook_capture", "capture", "--config", path]
+        self._start_subprocess(
+            ["-m", "ebook_capture", "run", "-y", "--config", path],
+            label="run subprocess",
         )
-        self._proc.readyReadStandardOutput.connect(self._read_stdout)
-        self._proc.readyReadStandardError.connect(self._read_stderr)
-        self._proc.finished.connect(self._on_finished)
 
-        self.ui.pb_progress.setRange(0, 0)
-        self.ui.lb_time.setText("Running…")
-        self.ui.pte_status.appendPlainText("Starting capture subprocess…\n")
-        self._proc.start()
+    def _start_assemble(self) -> None:
+        cfg = self._config_from_widgets()
+        cfg.output_mode = OUTPUT_TEXT
+        err = self._assemble_preflight(cfg)
+        if err:
+            QMessageBox.warning(self, "Assemble", err)
+            return
+
+        fd, path = tempfile.mkstemp(suffix=".json", prefix="ebook_assemble_")
+        os.close(fd)
+        cfg.to_json_file(path)
+        self._job_config_path = path
+        style = str(self.cb_assemble_style.currentData() or cfg.assemble_style or "full")
+        self._start_subprocess(
+            [
+                "-m",
+                "ebook_capture",
+                "run",
+                "-y",
+                "--config",
+                path,
+                "--style",
+                style,
+            ],
+            label=f"assemble ({style})",
+        )
 
     def _read_stdout(self) -> None:
         if self._proc:
@@ -666,20 +699,21 @@ class CaptureDialog(QDialog):
         self._job_config_path = None
 
     def _cancel_job(self) -> None:
-        if self._proc is not None and self._proc.state() != QProcess.NotRunning:
+        if self._job_running():
             self._proc.kill()
             self.ui.pte_status.appendPlainText("Cancelled.\n")
             self.ui.lb_time.setText("Cancelled")
 
 
 def run_gui() -> None:
+    from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QApplication
 
-    app = QApplication(sys.argv)
-    app.setAttribute(Qt.AA_EnableHighDpiScaling)
-    app.setAttribute(Qt.AA_UseHighDpiPixmaps)
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
-    # qt-material must load after QApplication exists (library requirement).
+    app = QApplication(sys.argv)
+
     from gui.theme import apply_material_theme
 
     apply_material_theme(app, dark=True)

@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ebook-capture"
 version = "0.2.0"
-description = "Screen region capture for ebooks: PDF, OCR, optional Google TTS; CLI + PyQt5 GUI"
+description = "Screen region capture for ebooks: image PDF, structured OCR text; CLI + PyQt5 GUI"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "PyQt5>=5.15",
-  "qt-material>=2.14",
+  "qt-material>=2.14,<2.15",
   "pandas>=1.5",
   "pyautogui>=0.9",
   "mss>=9.0.1",
@@ -24,14 +24,21 @@ dependencies = [
   "reportlab>=4.0",
 ]
 
-[project.optional-dependencies]
-voice = [
-  "google-cloud-texttospeech>=2.14",
-  "pydub>=0.25",
-]
-
 [project.scripts]
 ebook-capture = "ebook_capture:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
+markers = [
+  "integration: end-to-end tests that exercise CLI handlers",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

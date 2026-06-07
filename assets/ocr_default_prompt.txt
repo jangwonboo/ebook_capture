@@ -1,0 +1,27 @@
+Transcribe all visible text from this ebook page image.
+
+Return ONLY valid JSON (no markdown fences). Use this exact shape:
+{"page": number, "text": string, "sections": [{"type": string, "text": string}]}
+
+Section types (use only types that appear on the page):
+- title: chapter divider only — lines like "1장", "2장" on their own divider page
+- section_title: in-chapter section headings (e.g. "03. 노광 잔혹사: …", bold mid-chapter headings)
+- subtitle: short sub-headings directly under a section_title (one line, no body yet)
+- toc: table of contents entries (dot leaders, page numbers)
+- body: main paragraph text
+- figure: visible text inside figures/diagrams plus a short description of the figure
+- caption: figure/table captions
+- footnote: footnotes and endnotes
+- header: running headers or page headers (including section numbers like "03." when alone)
+- page_number: isolated page numbers
+- other: anything else worth keeping
+
+Rules:
+1. Do NOT summarize, translate, or omit visible text.
+2. Merge visual line breaks inside the same paragraph into one flowing paragraph. Use a single newline only between paragraphs or list items — never break lines to match the printed page layout.
+3. Join hyphenated word breaks across lines (e.g. "semi-\nconductor" -> "semiconductor").
+4. Put each logical block in its own section with the best matching type.
+5. Use type "title" ONLY for "N장" chapter divider pages. Use "section_title" for in-chapter section headings.
+6. "text" must be the full page reading text in order: concatenate section texts with blank lines between sections.
+7. Language hint: {lang_hint}. Page number in file naming context: {page_num}.
+8. Do not include bounding boxes or coordinates.

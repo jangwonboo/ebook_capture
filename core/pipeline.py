@@ -18,11 +18,9 @@ from core.screen_capture import (
 from core.config import (
     CAPTURE_MANUAL,
     CaptureConfig,
-    OUTPUT_PDF_SEARCHABLE,
     PHASE_CAPTURE,
     PHASE_OCR,
     PHASE_PDF,
-    PHASE_VOICE,
     WINDOW_CAPTURE_PRINTWINDOW,
 )
 
@@ -46,6 +44,7 @@ def _screen_region(cfg: CaptureConfig) -> tuple[int, int, int, int]:
         cfg.capture_mode,
         use_client_rect=cfg.use_window_client_rect,
         prefer_foreground=cfg.prefer_foreground_window_match,
+        pinned_hwnd=cfg.pinned_target_hwnd,
     )
 
 
@@ -54,22 +53,33 @@ def _activate_target(cfg: CaptureConfig) -> None:
         return
     from core import windows_util as wu
 
+    if cfg.pinned_target_hwnd > 0:
+        wu.focus_window_for_keyboard(cfg.pinned_target_hwnd)
+        return
     wu.activate_window_title(
         cfg.target_window_title,
         prefer_foreground=cfg.prefer_foreground_window_match,
+        pinned_hwnd=0,
     )
 
 
-def _ensure_target_focus_before_page_turn(
-    cfg: CaptureConfig,
-    progress: ProgressFn | None,
-) -> None:
-    """Activate target window right before sending next_key."""
+def _send_page_turn_key(cfg: CaptureConfig, progress: ProgressFn | None) -> None:
+    """Foreground browser/tab and send next_key (SendInput; optional upper reader tap)."""
     if cfg.capture_mode == CAPTURE_MANUAL:
+        pyautogui.press(cfg.next_key)
         return
-    _activate_target(cfg)
-    _emit(progress, "TARGET_FOCUS_ACTIVATE before next_key")
-    time.sleep(0.04)
+    from core import windows_util as wu
+
+    left, top, w, h = _screen_region(cfg)
+    ok, detail = wu.send_page_turn_key(
+        cfg.next_key,
+        pinned_hwnd=cfg.pinned_target_hwnd,
+        title=cfg.target_window_title,
+        prefer_foreground=cfg.prefer_foreground_window_match,
+        capture_rect=(left, top, w, h),
+        reader_focus_y_ratio=cfg.reader_focus_y_ratio,
+    )
+    _emit(progress, f"TARGET_KEY_SENT key={cfg.next_key!r} ok={ok} {detail}")
 
 
 def _debug_rect_lines(cfg: CaptureConfig) -> list[str]:
@@ -196,21 +206,20 @@ def _valid_text(path: Path) -> bool:
     return path.is_file() and path.stat().st_size >= 0
 
 
-def _valid_json(path: Path) -> bool:
+def _valid_ocr_json(path: Path) -> bool:
     if not path.is_file() or path.stat().st_size <= 0:
         return False
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
-    return isinstance(data, dict) and isinstance(data.get("blocks"), list)
+    if not isinstance(data, dict):
+        return False
+    sections = data.get("sections")
+    return isinstance(sections, list)
 
 
 def _valid_pdf(path: Path) -> bool:
-    return path.is_file() and path.stat().st_size > 0
-
-
-def _valid_mp3(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 0
 
 
@@ -231,7 +240,6 @@ def _load_state(cfg: CaptureConfig) -> dict[str, Any]:
             PHASE_CAPTURE: {},
             PHASE_OCR: {},
             PHASE_PDF: {},
-            PHASE_VOICE: {},
         },
         "errors": [],
         "outputs": {},
@@ -245,7 +253,6 @@ def _save_state(cfg: CaptureConfig, state: dict[str, Any]) -> None:
     state["outputs"] = {
         "final_pdf": str(cfg.final_pdf_path()),
         "combined_txt": str(cfg.final_ocr_text_path()),
-        "final_voice": str(cfg.final_voice_path()),
     }
     _atomic_write_json(cfg.state_path(), state)
 
@@ -338,9 +345,13 @@ def _capture_one_page(
             from core import win32_bitmap_capture as wbc
 
             try:
-                hwnd = wu.resolve_target_hwnd(
-                    cfg.target_window_title,
-                    prefer_foreground=cfg.prefer_foreground_window_match,
+                hwnd = (
+                    cfg.pinned_target_hwnd
+                    if cfg.pinned_target_hwnd > 0
+                    else wu.resolve_target_hwnd(
+                        cfg.target_window_title,
+                        prefer_foreground=cfg.prefer_foreground_window_match,
+                    )
                 )
                 raw = wbc.capture_client_printwindow(hwnd)
                 if raw is not None:
@@ -358,10 +369,11 @@ def _capture_one_page(
                 if cfg.debug_capture:
                     _emit(progress, f"DEBUG_RECT printwindow_failed {ex!r}")
 
-    _ensure_pointer_in_capture_rect(left, top, w, h, progress)
-    if cfg.debug_capture:
-        cx, cy = pyautogui.position()
-        _emit(progress, f"DEBUG_RECT cursor_after_pointer_adjust x={cx} y={cy}")
+    if shot is None:
+        _ensure_pointer_in_capture_rect(left, top, w, h, progress)
+        if cfg.debug_capture:
+            cx, cy = pyautogui.position()
+            _emit(progress, f"DEBUG_RECT cursor_after_pointer_adjust x={cx} y={cy}")
     restore_pointer = None
     if shot is None:
         if cfg.debug_capture:
@@ -377,6 +389,24 @@ def _capture_one_page(
     return shot
 
 
+def _pin_capture_target(cfg: CaptureConfig, progress: ProgressFn | None) -> None:
+    """Lock one HWND for the whole capture phase (avoids foreground drift to another match)."""
+    if cfg.capture_mode == CAPTURE_MANUAL:
+        return
+    from core import windows_util as wu
+
+    hwnd, title = wu.pin_target_window(
+        cfg.target_window_title,
+        prefer_foreground=cfg.prefer_foreground_window_match,
+    )
+    cfg.pinned_target_hwnd = hwnd
+    _emit(
+        progress,
+        f"TARGET_WINDOW pinned title={title!r} hwnd=0x{hwnd:x} "
+        f"(query={cfg.target_window_title!r})",
+    )
+
+
 def _run_phase_capture(
     cfg: CaptureConfig,
     state: dict[str, Any],
@@ -384,6 +414,7 @@ def _run_phase_capture(
     progress: ProgressFn | None,
 ) -> None:
     _emit(progress, "Phase I: capture PNG")
+    _pin_capture_target(cfg, progress)
     skipped_any = False
     for i, page_num in enumerate(cfg.page_numbers(n_run)):
         img_path = cfg.page_png_path(page_num)
@@ -417,9 +448,28 @@ def _run_phase_capture(
             _mark_page(cfg, state, PHASE_CAPTURE, page_num, "failed", img_path, repr(ex))
             raise
         if i < n_run - 1:
-            _ensure_target_focus_before_page_turn(cfg, progress)
-            pyautogui.press(cfg.next_key)
+            _send_page_turn_key(cfg, progress)
             time.sleep(cfg.delay_sec)
+
+
+def _collect_combined_ocr_parts(cfg: CaptureConfig) -> list[str]:
+    """Build combined OCR text from all page .txt files already in tmp/."""
+    import re
+
+    parts: list[tuple[int, str]] = []
+    pattern = re.compile(rf"^{re.escape(cfg.title)}_(\d+)\.txt$")
+    tmp = cfg.tmp_dir()
+    if not tmp.is_dir():
+        return []
+    for path in tmp.glob(f"{cfg.title}_*.txt"):
+        match = pattern.match(path.name)
+        if not match:
+            continue
+        page_num = int(match.group(1))
+        text = path.read_text(encoding="utf-8")
+        parts.append((page_num, f"=== page {page_num} ===\n{text}"))
+    parts.sort(key=lambda item: item[0])
+    return [block for _, block in parts]
 
 
 def _run_phase_ocr(
@@ -428,43 +478,86 @@ def _run_phase_ocr(
     n_run: int,
     progress: ProgressFn | None,
 ) -> int:
-    from core.google_ocr import extract_layout_from_image
+    from core.google_ocr import (
+        extract_page_structure_from_image,
+        extract_page_structure_from_pdf_page,
+        page_structure_to_text,
+    )
 
-    _emit(progress, "Phase II: PNG -> TXT + OCR JSON (Google Gemini)")
-    combined: list[str] = []
+    pdf_path = cfg.resolved_input_pdf()
+    if pdf_path is not None and pdf_path.is_file():
+        _emit(progress, "Phase II: PDF -> structured OCR JSON + TXT (Google Gemini)")
+    else:
+        _emit(progress, "Phase II: PNG -> structured OCR JSON + TXT (Google Gemini)")
     try:
         for page_num in cfg.page_numbers(n_run):
-            png = cfg.page_png_path(page_num)
             txt_path = cfg.page_txt_path(page_num)
             json_path = cfg.page_ocr_json_path(page_num)
-            if not _valid_png(png):
-                _emit(progress, f"OCR_MISSING_IMAGE page#{page_num} {png}")
-                return 3
-            if _can_skip_page(
-                cfg,
-                state,
-                PHASE_OCR,
-                page_num,
-                lambda t=txt_path, j=json_path: _valid_text(t) and _valid_json(j),
-            ):
-                text = txt_path.read_text(encoding="utf-8")
-                combined.append(f"=== page {page_num} ===\n{text}")
-                _emit(progress, f"OCR_SKIP page#{page_num} {txt_path}")
-                continue
+            if pdf_path is not None and pdf_path.is_file():
+                pdf_index = cfg.pdf_page_index(page_num)
+                if _can_skip_page(
+                    cfg,
+                    state,
+                    PHASE_OCR,
+                    page_num,
+                    lambda t=txt_path, j=json_path: _valid_text(t) and _valid_ocr_json(j),
+                ):
+                    _emit(progress, f"OCR_SKIP page#{page_num} {txt_path}")
+                    continue
+                try:
+                    _emit(
+                        progress,
+                        f"OCR_PDF_PAGE pdf_page={page_num} pdf_index={pdf_index}",
+                    )
+                    structure = extract_page_structure_from_pdf_page(
+                        pdf_path,
+                        pdf_index,
+                        page_num=page_num,
+                        lang_hint=cfg.ocr_lang,
+                        prompt=cfg.ocr_text_prompt,
+                        prompt_file=cfg.resolved_ocr_prompt_file(),
+                    )
+                except ValueError as exc:
+                    _mark_page(cfg, state, PHASE_OCR, page_num, "failed", json_path, str(exc))
+                    raise RuntimeError(str(exc)) from exc
+            else:
+                png = cfg.page_png_path(page_num)
+                if not _valid_png(png):
+                    _emit(progress, f"OCR_MISSING_IMAGE page#{page_num} {png}")
+                    return 3
+                if _can_skip_page(
+                    cfg,
+                    state,
+                    PHASE_OCR,
+                    page_num,
+                    lambda t=txt_path, j=json_path: _valid_text(t) and _valid_ocr_json(j),
+                ):
+                    _emit(progress, f"OCR_SKIP page#{page_num} {txt_path}")
+                    continue
+                structure = extract_page_structure_from_image(
+                    png,
+                    page_num=page_num,
+                    lang_hint=cfg.ocr_lang,
+                    prompt=cfg.ocr_text_prompt,
+                    prompt_file=cfg.resolved_ocr_prompt_file(),
+                )
             try:
-                layout = extract_layout_from_image(png, lang_hint=cfg.ocr_lang)
-                layout["page"] = page_num
-                text = str(layout.get("text", "")).strip()
+                text = page_structure_to_text(structure)
                 _atomic_write_text(txt_path, text)
-                _atomic_write_json(json_path, layout)
-                combined.append(f"=== page {page_num} ===\n{text}")
+                _atomic_write_json(json_path, structure)
                 _mark_page(cfg, state, PHASE_OCR, page_num, "done", json_path)
-                _emit(progress, f"OCR_TEXT_OK page#{page_num} {txt_path}")
-                _emit(progress, f"OCR_JSON_OK page#{page_num} {json_path}")
+                if text:
+                    _emit(progress, f"OCR_TEXT_OK page#{page_num} {txt_path}")
+                    _emit(progress, f"OCR_JSON_OK page#{page_num} {json_path}")
+                else:
+                    _emit(progress, f"OCR_EMPTY page#{page_num} (no visible text) {json_path}")
             except RuntimeError as exc:
                 _mark_page(cfg, state, PHASE_OCR, page_num, "failed", json_path, str(exc))
                 raise
-        _atomic_write_text(cfg.final_ocr_text_path(), "\n\n".join(combined))
+        _atomic_write_text(
+            cfg.final_ocr_text_path(),
+            "\n\n".join(_collect_combined_ocr_parts(cfg)),
+        )
         _emit(progress, f"OCR_OK {cfg.final_ocr_text_path()}")
         return 0
     except RuntimeError as exc:
@@ -478,29 +571,16 @@ def _run_phase_pdf(
     n_run: int,
     progress: ProgressFn | None,
 ) -> int:
-    from core.searchable_pdf import (
-        build_page_image_pdf,
-        build_page_searchable_pdf,
-        merge_pdfs,
-    )
+    from core.image_pdf import build_page_image_pdf, merge_pdfs
 
-    searchable = cfg.output_mode == OUTPUT_PDF_SEARCHABLE
-    _emit(progress, "Phase III: searchable PDF" if searchable else "Phase III: PDF")
+    _emit(progress, "Phase III: image PDF")
     page_pdfs: list[Path] = []
     try:
         for page_num in cfg.page_numbers(n_run):
             png = cfg.page_png_path(page_num)
-            ocr_json = cfg.page_ocr_json_path(page_num)
-            page_pdf = (
-                cfg.page_pdf_path(page_num)
-                if searchable
-                else cfg.page_path(page_num, ".page.pdf")
-            )
+            page_pdf = cfg.page_image_pdf_path(page_num)
             if not _valid_png(png):
                 _emit(progress, f"PDF_MISSING_IMAGE page#{page_num} {png}")
-                return 3
-            if searchable and not _valid_json(ocr_json):
-                _emit(progress, f"PDF_MISSING_OCR_JSON page#{page_num} {ocr_json}")
                 return 3
             if _can_skip_page(
                 cfg,
@@ -514,10 +594,7 @@ def _run_phase_pdf(
                 continue
             try:
                 part = _part_path(page_pdf)
-                if searchable:
-                    build_page_searchable_pdf(png, ocr_json, part)
-                else:
-                    build_page_image_pdf(png, part)
+                build_page_image_pdf(png, part)
                 os.replace(part, page_pdf)
                 if not _valid_pdf(page_pdf):
                     raise RuntimeError(f"Generated invalid PDF page: {page_pdf}")
@@ -534,68 +611,6 @@ def _run_phase_pdf(
         return 0
     except Exception as exc:
         _emit(progress, f"PDF_FAIL {exc}")
-        return 3
-
-
-def _run_phase_voice(
-    cfg: CaptureConfig,
-    state: dict[str, Any],
-    n_run: int,
-    progress: ProgressFn | None,
-) -> int:
-    from core import tts as tts_mod
-    from core.google_ocr import extract_text_from_image
-
-    _emit(progress, "Optional Phase IV: text to speech")
-    mp3_files: list[Path] = []
-    try:
-        for page_num in cfg.page_numbers(n_run):
-            txt_path = cfg.page_txt_path(page_num)
-            if txt_path.is_file():
-                text = txt_path.read_text(encoding="utf-8")
-            else:
-                png = cfg.page_png_path(page_num)
-                if not png.is_file():
-                    _emit(progress, f"SKIP_VOICE_NO_IMG {png}")
-                    continue
-                text = extract_text_from_image(png, lang_hint=cfg.ocr_lang)
-                _atomic_write_text(txt_path, text)
-            mp3_path = cfg.page_path(page_num, ".mp3")
-            if _can_skip_page(
-                cfg,
-                state,
-                PHASE_VOICE,
-                page_num,
-                lambda path=mp3_path: _valid_mp3(path),
-            ):
-                mp3_files.append(mp3_path)
-                _emit(progress, f"VOICE_PAGE_SKIP page#{page_num} {mp3_path}")
-                continue
-            try:
-                part = _part_path(mp3_path)
-                tts_mod.synthesize_to_mp3(
-                    text,
-                    part,
-                    lang=cfg.voice_lang_code,
-                    model=cfg.voice_model,
-                    gender=cfg.voice_gender,
-                )
-                os.replace(part, mp3_path)
-                if not _valid_mp3(mp3_path):
-                    raise RuntimeError(f"Generated invalid MP3 page: {mp3_path}")
-                _mark_page(cfg, state, PHASE_VOICE, page_num, "done", mp3_path)
-                mp3_files.append(mp3_path)
-            except Exception as exc:
-                _mark_page(cfg, state, PHASE_VOICE, page_num, "failed", mp3_path, str(exc))
-                raise
-        if mp3_files:
-            final_part = _part_path(cfg.final_voice_path())
-            tts_mod.merge_mp3_files(mp3_files, final_part)
-            os.replace(final_part, cfg.final_voice_path())
-            _emit(progress, f"VOICE_OK {cfg.final_voice_path()}")
-        return 0
-    except RuntimeError as exc:
-        _emit(progress, f"VOICE_FAIL {exc}")
         return 3
 
 
@@ -631,10 +646,6 @@ def run_capture(
             return rc
     if cfg.run_pdf_phase:
         rc = _run_phase_pdf(cfg, state, n_run, progress)
-        if rc:
-            return rc
-    if cfg.voice:
-        rc = _run_phase_voice(cfg, state, n_run, progress)
         if rc:
             return rc
     _emit(progress, "DONE")

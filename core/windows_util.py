@@ -91,6 +91,293 @@ def _hwnd_int(win: object) -> int:
     return int(getattr(win, "_hWnd", 0))
 
 
+def _win32_modules() -> tuple[ctypes.WinDLL, ctypes.WinDLL]:
+    return ctypes.windll.user32, ctypes.windll.kernel32  # type: ignore[attr-defined]
+
+
+def foreground_hwnd() -> int:
+    """HWND of the current foreground window (0 if unavailable)."""
+    if sys.platform != "win32":
+        return 0
+    user32, _ = _win32_modules()
+    return int(user32.GetForegroundWindow())
+
+
+def is_foreground_hwnd(hwnd: int) -> bool:
+    return hwnd > 0 and foreground_hwnd() == hwnd
+
+
+def _unlock_foreground_for_automation() -> None:
+    """Work around Windows SetForegroundWindow restrictions from background tools."""
+    if sys.platform != "win32":
+        return
+    user32, _ = _win32_modules()
+    ASFW_ANY = 0xFFFFFFFF
+    user32.AllowSetForegroundWindow(ASFW_ANY)
+    VK_MENU = 0x12
+    KEYEVENTF_KEYUP = 0x0002
+    user32.keybd_event(VK_MENU, 0, 0, 0)
+    user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
+    time.sleep(0.03)
+
+
+def force_foreground_hwnd(hwnd: int) -> bool:
+    """Bring ``hwnd`` to the foreground (Chrome/RDP need more than pygetwindow.activate)."""
+    if sys.platform != "win32" or hwnd <= 0:
+        return False
+    _unlock_foreground_for_automation()
+    user32, kernel32 = _win32_modules()
+    SW_RESTORE = 9
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, SW_RESTORE)
+    user32.ShowWindow(hwnd, SW_RESTORE)
+    user32.BringWindowToTop(hwnd)
+    user32.SetForegroundWindow(hwnd)
+    if user32.GetForegroundWindow() == hwnd:
+        return True
+
+    foreground = user32.GetForegroundWindow()
+    if foreground == hwnd:
+        return True
+
+    pid = wintypes.DWORD()
+    fg_thread = user32.GetWindowThreadProcessId(foreground, ctypes.byref(pid))
+    target_thread = user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    current_thread = kernel32.GetCurrentThreadId()
+
+    attached_fg = bool(user32.AttachThreadInput(current_thread, fg_thread, True))
+    attached_target = bool(user32.AttachThreadInput(current_thread, target_thread, True))
+    try:
+        user32.SetForegroundWindow(hwnd)
+        user32.BringWindowToTop(hwnd)
+    finally:
+        if attached_target:
+            user32.AttachThreadInput(current_thread, target_thread, False)
+        if attached_fg:
+            user32.AttachThreadInput(current_thread, fg_thread, False)
+
+    return user32.GetForegroundWindow() == hwnd
+
+
+def foreground_window_title() -> str:
+    """Title of the current foreground window (empty if unavailable)."""
+    if sys.platform != "win32":
+        return ""
+    user32, _ = _win32_modules()
+    hwnd = int(user32.GetForegroundWindow())
+    if hwnd == 0:
+        return ""
+    length = user32.GetWindowTextLengthW(hwnd)
+    if length <= 0:
+        return ""
+    buf = ctypes.create_unicode_buffer(length + 1)
+    user32.GetWindowTextW(hwnd, buf, length + 1)
+    return buf.value.strip()
+
+
+def focus_window_for_keyboard(hwnd: int) -> bool:
+    """Foreground the window for keyboard input without moving or clicking the mouse."""
+    if sys.platform != "win32" or hwnd <= 0:
+        return False
+    user32, _ = _win32_modules()
+    if not force_foreground_hwnd(hwnd):
+        return False
+    child = find_browser_content_hwnd(hwnd)
+    focus_hwnd = child if child else hwnd
+    try:
+        user32.SetFocus(focus_hwnd)
+    except Exception:
+        pass
+    try:
+        user32.SwitchToThisWindow(hwnd, True)
+    except Exception:
+        pass
+    time.sleep(0.12)
+    return is_foreground_hwnd(hwnd)
+
+
+_VK_BY_KEY: dict[str, int] = {
+    "right": 0x27,
+    "left": 0x25,
+    "up": 0x26,
+    "down": 0x28,
+    "pagedown": 0x22,
+    "pageup": 0x21,
+    "home": 0x24,
+    "end": 0x23,
+    "space": 0x20,
+    "enter": 0x0D,
+    "return": 0x0D,
+}
+
+
+class _KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+
+class _MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+
+class _HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [
+        ("uMsg", wintypes.DWORD),
+        ("wParamL", wintypes.WORD),
+        ("wParamH", wintypes.WORD),
+    ]
+
+
+class _INPUTUNION(ctypes.Union):
+    _fields_ = [
+        ("ki", _KEYBDINPUT),
+        ("mi", _MOUSEINPUT),
+        ("hi", _HARDWAREINPUT),
+    ]
+
+
+class _INPUT(ctypes.Structure):
+    _fields_ = [
+        ("type", wintypes.DWORD),
+        ("ii", _INPUTUNION),
+    ]
+
+
+def _vk_for_key(key: str) -> int | None:
+    return _VK_BY_KEY.get(str(key or "").strip().lower())
+
+
+def find_browser_content_hwnd(top_hwnd: int) -> int | None:
+    """Largest visible Chrome/Edge renderer child HWND, if any."""
+    if sys.platform != "win32" or top_hwnd <= 0:
+        return None
+    user32, _ = _win32_modules()
+    best_hwnd: int | None = None
+    best_area = 0
+    target_classes = (
+        "Chrome_RenderWidgetHostHWND",
+        "Chrome_WidgetWin_0",
+        "MozillaWindowClass",
+    )
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+    def enum_proc(hwnd: int, _lparam: int) -> bool:
+        nonlocal best_hwnd, best_area
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        cls_buf = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, cls_buf, 256)
+        cls = cls_buf.value
+        if not any(token in cls for token in target_classes):
+            return True
+        rect = wintypes.RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        area = max(0, rect.right - rect.left) * max(0, rect.bottom - rect.top)
+        if area > best_area:
+            best_area = area
+            best_hwnd = int(hwnd)
+        return True
+
+    user32.EnumChildWindows(top_hwnd, enum_proc, 0)
+    return best_hwnd
+
+
+def _sendinput_vk(vk: int) -> bool:
+    if sys.platform != "win32":
+        return False
+    user32, _ = _win32_modules()
+    INPUT_KEYBOARD = 1
+    KEYEVENTF_KEYUP = 0x0002
+    extra = ctypes.c_ulong(0)
+    extra_ptr = ctypes.pointer(extra)
+    inputs = (_INPUT * 2)()
+    inputs[0].type = INPUT_KEYBOARD
+    inputs[0].ii.ki = _KEYBDINPUT(vk, 0, 0, 0, extra_ptr)
+    inputs[1].type = INPUT_KEYBOARD
+    inputs[1].ii.ki = _KEYBDINPUT(vk, 0, KEYEVENTF_KEYUP, 0, extra_ptr)
+    sent = int(user32.SendInput(2, ctypes.byref(inputs[0]), ctypes.sizeof(_INPUT)))
+    return sent == 2
+
+
+def _reader_focus_tap(
+    left: int,
+    top: int,
+    width: int,
+    height: int,
+    y_ratio: float,
+) -> tuple[int, int]:
+    """Tap upper reader body (not bottom status bar) so the tab accepts keyboard."""
+    import pyautogui
+
+    x = left + max(1, width // 2)
+    y = top + max(1, int(height * max(0.05, min(y_ratio, 0.45))))
+    pyautogui.click(x, y)
+    time.sleep(0.08)
+    return x, y
+
+
+def send_page_turn_key(
+    key: str,
+    *,
+    pinned_hwnd: int = 0,
+    title: str = "",
+    prefer_foreground: bool = True,
+    capture_rect: tuple[int, int, int, int] | None = None,
+    reader_focus_y_ratio: float = 0.15,
+) -> tuple[bool, str]:
+    """Foreground target window/tab and send ``key`` (SendInput). Returns (ok, log detail)."""
+    if sys.platform != "win32":
+        return False, "not Windows"
+    vk = _vk_for_key(key)
+    if vk is None:
+        return False, f"unknown key {key!r}"
+
+    try:
+        hwnd = (
+            pinned_hwnd
+            if pinned_hwnd > 0
+            else resolve_target_hwnd(title, prefer_foreground=prefer_foreground)
+        )
+    except Exception as ex:
+        return False, f"resolve hwnd failed: {ex}"
+
+    if not focus_window_for_keyboard(hwnd):
+        return False, f"foreground failed hwnd=0x{hwnd:x}"
+
+    parts = [f"hwnd=0x{hwnd:x}", f"foreground={foreground_window_title()!r}"]
+
+    if reader_focus_y_ratio > 0 and capture_rect is not None:
+        l, t, w, h = capture_rect
+        if w > 0 and h > 0:
+            tx, ty = _reader_focus_tap(l, t, w, h, reader_focus_y_ratio)
+            parts.append(f"reader_tap=({tx},{ty}) y_ratio={reader_focus_y_ratio}")
+
+    key_name = str(key).strip().lower()
+    via = "SendInput"
+    if _sendinput_vk(vk):
+        parts.append(f"vk=0x{vk:02x}")
+    else:
+        import pyautogui
+
+        pyautogui.press(key_name)
+        via = "pyautogui"
+        parts.append("SendInput_fallback")
+
+    return True, "; ".join(parts + [f"via={via}"])
+
+
 def resolve_target_hwnd(title: str, *, prefer_foreground: bool = True) -> int:
     """HWND of the window chosen by ``resolve_target_window``."""
     w = resolve_target_window(title, prefer_foreground=prefer_foreground)
@@ -233,6 +520,30 @@ def _base_rect_from_resolved_window(
     return frame_screen_rect(win)
 
 
+def window_for_hwnd(hwnd: int):
+    """Return the pygetwindow object for a known HWND."""
+    if not window_support_available() or hwnd <= 0:
+        raise RuntimeError("Window capture is not available on this platform")
+    assert gw is not None
+    for w in gw.getAllWindows():
+        try:
+            if _hwnd_int(w) == hwnd:
+                return w
+        except Exception:
+            continue
+    raise RuntimeError(f"Window HWND not found: 0x{hwnd:x}")
+
+
+def get_window_metrics_for_hwnd(
+    hwnd: int,
+    *,
+    use_client_rect: bool = True,
+) -> tuple[int, int, int, int]:
+    """Return left, top, width, height for a pinned HWND."""
+    w = window_for_hwnd(hwnd)
+    return _base_rect_from_resolved_window(w, use_client_rect=use_client_rect)
+
+
 def get_window_metrics(
     title: str,
     *,
@@ -330,20 +641,28 @@ def activate_window_title(
     title: str,
     *,
     prefer_foreground: bool = True,
+    pinned_hwnd: int = 0,
 ) -> bool:
     """Bring the resolved matching window to the foreground."""
     if not window_support_available() or not title.strip():
         return False
     try:
-        w = resolve_target_window(title, prefer_foreground=prefer_foreground)
+        hwnd = (
+            pinned_hwnd
+            if pinned_hwnd > 0
+            else resolve_target_hwnd(title, prefer_foreground=prefer_foreground)
+        )
+        if focus_window_for_keyboard(hwnd):
+            return True
+        w = window_for_hwnd(hwnd)
         if getattr(w, "isMinimized", False):
             try:
                 w.restore()
             except Exception:
                 pass
         w.activate()
-        time.sleep(0.12)
-        return True
+        time.sleep(0.15)
+        return is_foreground_hwnd(hwnd)
     except Exception:
         return False
 
@@ -374,11 +693,42 @@ def resolve_screen_rect(
     *,
     use_client_rect: bool = True,
     prefer_foreground: bool = True,
+    pinned_hwnd: int = 0,
 ) -> tuple[int, int, int, int]:
     """Live window rect adjusted for capture_mode."""
-    L, T, W, H = get_window_metrics(
+    if pinned_hwnd > 0:
+        L, T, W, H = get_window_metrics_for_hwnd(
+            pinned_hwnd,
+            use_client_rect=use_client_rect,
+        )
+    else:
+        L, T, W, H = get_window_metrics(
+            target_window_title,
+            use_client_rect=use_client_rect,
+            prefer_foreground=prefer_foreground,
+        )
+    return rect_for_capture_mode(L, T, W, H, capture_mode)
+
+
+def pin_target_window(
+    target_window_title: str,
+    *,
+    prefer_foreground: bool = True,
+) -> tuple[int, str]:
+    """Activate matching window and return (hwnd, full title) for the whole capture run."""
+    if not window_support_available() or not target_window_title.strip():
+        raise RuntimeError("Window capture is not available on this platform")
+    activate_window_title(
         target_window_title,
-        use_client_rect=use_client_rect,
         prefer_foreground=prefer_foreground,
     )
-    return rect_for_capture_mode(L, T, W, H, capture_mode)
+    w = resolve_target_window(
+        target_window_title,
+        prefer_foreground=prefer_foreground,
+    )
+    hwnd = _hwnd_int(w)
+    if hwnd == 0:
+        raise RuntimeError("Resolved window has no HWND")
+    force_foreground_hwnd(hwnd)
+    time.sleep(0.1)
+    return hwnd, (w.title or "").strip()

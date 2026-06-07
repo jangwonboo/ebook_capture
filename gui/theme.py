@@ -11,8 +11,13 @@ if TYPE_CHECKING:
 def apply_material_theme(app: "QApplication", *, dark: bool = True) -> bool:
     """Apply qt-material stylesheet. Returns True if applied."""
     try:
-        # Ensure QtGui is initialized before qt-material (avoids QFontDatabase warnings).
+        # qt-material 2.15+ targets Qt6 only; PyQt5 needs 2.14.x (see pyproject pin).
         from PyQt5 import QtGui  # noqa: F401
+        from PyQt5.QtWidgets import QApplication  # noqa: F401 — must precede qt_material
+
+        import qt_material
+        if not getattr(qt_material, "GUI", True):
+            raise ImportError("qt-material has no PyQt5 bindings")
 
         from qt_material import apply_stylesheet
 

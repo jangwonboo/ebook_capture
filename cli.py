@@ -169,42 +169,6 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_output_args(run)
     _add_run_options(run)
 
-    # Deprecated aliases → run
-    for name, default_out in (
-        ("capture", OUTPUT_PDF),
-        ("ocr", OUTPUT_TEXT),
-        ("ocr-pdf", OUTPUT_TEXT),
-        ("assemble", OUTPUT_TEXT),
-        ("assemble-md", OUTPUT_TEXT),
-    ):
-        alias = sub.add_parser(name, help=f"Deprecated: use run --{default_out.replace('images','images')}.")
-        alias.set_defaults(_handler=_cmd_run, _deprecated=name)
-        _add_book_args(alias)
-        if name in {"capture", "ocr", "ocr-pdf"}:
-            _add_capture_args(alias)
-        _add_output_args(alias, default=default_out)
-        _add_run_options(alias)
-        if name == "ocr":
-            alias.add_argument("source", nargs="?", type=Path, default=None)
-        if name == "ocr-pdf":
-            alias.add_argument("pdf", type=Path)
-        if name in {"assemble", "assemble-md"}:
-            alias.add_argument("--output-md", type=Path, default=None)
-            alias.add_argument("--structure-json", type=Path, default=None)
-            alias.add_argument(
-                "--page-comments",
-                dest="page_comments",
-                action="store_const",
-                const=True,
-                default=None,
-            )
-            alias.add_argument(
-                "--no-page-comments",
-                dest="page_comments",
-                action="store_const",
-                const=False,
-            )
-
     return p
 
 
@@ -256,14 +220,6 @@ def _apply_args(cfg: CaptureConfig, args: argparse.Namespace) -> CaptureConfig:
     if getattr(args, "hide_cursor_during_capture", False):
         cfg.hide_cursor_during_capture = True
 
-    # Legacy alias args
-    if getattr(args, "source", None):
-        cfg.input_pdf = str(Path(args.source).expanduser())
-        cfg.output_mode = OUTPUT_TEXT
-    if getattr(args, "pdf", None):
-        cfg.input_pdf = str(Path(args.pdf).expanduser())
-        cfg.output_mode = OUTPUT_TEXT
-
     return cfg.normalize()
 
 
@@ -282,12 +238,12 @@ def _resolve_config(args: argparse.Namespace) -> CaptureConfig | int:
         cfg = CaptureConfig.from_json_file(path)
         return _apply_args(cfg, args)
 
-    if getattr(args, "input_pdf", None) or getattr(args, "source", None) or getattr(args, "pdf", None):
+    if getattr(args, "input_pdf", None):
         if not args.title and not args.config:
-            src = getattr(args, "input_pdf", None) or getattr(args, "source", None) or getattr(args, "pdf", None)
+            src = Path(args.input_pdf).expanduser()
             cfg = CaptureConfig(
-                title=Path(src).stem if src else DEFAULT_BOOK_TITLE,
-                base_dir=str(Path(src).parent if src else "."),
+                title=src.stem,
+                base_dir=str(src.parent),
                 output_mode=OUTPUT_TEXT,
             )
             return _apply_args(cfg, args)
@@ -319,10 +275,6 @@ def _cmd_gui(_: argparse.Namespace) -> int:
 
 def _cmd_run(args: argparse.Namespace) -> int:
     from core.job_runner import run_output_job
-
-    deprecated = getattr(args, "_deprecated", None)
-    if deprecated:
-        print(f"Note: '{deprecated}' is deprecated; use: ebook-capture run --...", file=sys.stderr)
 
     if getattr(args, "active_window", False) and sys.platform != "win32":
         print("Error: --active-window is Windows only.", file=sys.stderr)

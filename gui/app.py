@@ -117,9 +117,6 @@ class CaptureDialog(QDialog):
             self.ui.cb_ocr_lang_pri.addItem(str(lang))
             self.ui.cb_ocr_lang_sec.addItem(str(lang))
 
-        self.ui.cb_voice.hide()
-        self.ui.cb_voice_lang.hide()
-
         self.ui.lb_pages.hide()
         self.ui.sb_pages.hide()
         self.ui.btn_window.hide()
@@ -179,9 +176,6 @@ class CaptureDialog(QDialog):
             f"Book title — default: {DEFAULT_BOOK_TITLE}"
         )
 
-        self.ui.cb_img.hide()
-        self.ui.cb_pdf.hide()
-        self.ui.cb_ocr.hide()
         self.cb_output_mode = QComboBox(self.ui.gb_options)
         self.cb_output_mode.setGeometry(75, 195, 371, 26)
         for label, value in OUTPUT_MODE_ITEMS:

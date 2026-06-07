@@ -17,14 +17,6 @@ OUTPUT_PDF = "pdf"
 OUTPUT_TEXT = "text"
 OUTPUT_MODES = frozenset({OUTPUT_IMAGES, OUTPUT_PDF, OUTPUT_TEXT})
 
-_LEGACY_OUTPUT_ALIASES = {
-    "pdf_image": OUTPUT_PDF,
-    "capture_only": OUTPUT_IMAGES,
-    "searchable_pdf": OUTPUT_PDF,
-    "pdf_searchable": OUTPUT_PDF,
-    "audio": OUTPUT_TEXT,
-}
-
 CAPTURE_MANUAL = "manual"
 CAPTURE_WINDOW_FULL = "window_full"
 CAPTURE_WINDOW_LEFT_THIRD = "window_left_third"
@@ -58,20 +50,14 @@ def normalize_output_mode(raw: str) -> str:
     key = str(raw or OUTPUT_PDF).strip().lower()
     if key in OUTPUT_MODES:
         return key
-    if key in _LEGACY_OUTPUT_ALIASES:
-        return _LEGACY_OUTPUT_ALIASES[key]
     raise ValueError(f"output_mode must be one of: {', '.join(sorted(OUTPUT_MODES))}")
 
 
-def _output_mode_from_legacy_mapping(data: Mapping[str, Any]) -> str:
-    raw = str(data.get("output_mode", "")).strip()
-    if raw:
-        return normalize_output_mode(raw)
-    if bool(data.get("run_ocr_phase", data.get("ocr", False))):
-        return OUTPUT_TEXT
-    if bool(data.get("run_pdf_phase", data.get("build_pdf", True))):
+def _output_mode_from_mapping(data: Mapping[str, Any]) -> str:
+    raw = str(data.get("output_mode", OUTPUT_PDF)).strip()
+    if not raw:
         return OUTPUT_PDF
-    return OUTPUT_IMAGES
+    return normalize_output_mode(raw)
 
 
 @dataclass
@@ -294,7 +280,7 @@ class CaptureConfig:
             delay_sec=float(data.get("delay_sec", 1.0)),
             next_key=str(data.get("next_key", "pagedown")),
             reader_focus_y_ratio=float(data.get("reader_focus_y_ratio", 0.35)),
-            output_mode=_output_mode_from_legacy_mapping(data),
+            output_mode=_output_mode_from_mapping(data),
             skip_capture=bool(data.get("skip_capture", False)),
             resume=bool(data.get("resume", True)),
             force_phase=str(data.get("force_phase", "")),

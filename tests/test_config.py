@@ -51,8 +51,9 @@ def test_ocr_skip_capture() -> None:
     assert cfg.run_ocr_phase is True
 
 
-def test_legacy_output_alias() -> None:
-    assert normalize_output_mode("pdf_image") == OUTPUT_PDF
+def test_invalid_output_mode_raises() -> None:
+    with pytest.raises(ValueError, match="output_mode"):
+        normalize_output_mode("pdf_image")
 
 
 def test_assemble_style_validation() -> None:

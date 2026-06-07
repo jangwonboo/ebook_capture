@@ -1,6 +1,7 @@
 # ebook_capture 사용법
 
-출력 **3종** — `images` | `pdf` | `text` — 과 CLI **`run`** 명령으로 정리된 매뉴얼입니다.
+출력 **3종** — `images` | `pdf` | `text` — 과 CLI **`run`** 명령으로 정리된 매뉴얼입니다.  
+개요·설치: [README.md](README.md)
 
 ```cmd
 python -m ebook_capture run [options]
@@ -36,8 +37,6 @@ flowchart LR
 |------|------|
 | `gui` | PyQt5 GUI |
 | **`run`** | `--images` / `--pdf` / `--text` 중 하나 실행 |
-
-Deprecated alias (동일 동작): `capture`, `ocr`, `ocr-pdf`, `assemble`, `assemble-md` → `run` 사용 권장
 
 ---
 
@@ -89,7 +88,7 @@ python -m ebook_capture run --config cfg.json --text --input-pdf book.pdf
 
 | 옵션 | 설명 |
 |------|------|
-| `--ocr-lang` | Tesseract 언어 코드 |
+| `--ocr-lang` | Gemini OCR 언어 힌트 (예: `kor`, `eng`) |
 | `--ocr-prompt` | Gemini OCR 프롬프트 (인라인) |
 | `--ocr-prompt-file` | 프롬프트 파일 경로 |
 

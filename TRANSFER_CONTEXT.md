@@ -1,50 +1,54 @@
 # ebook_capture Transfer Context
 
+> **Current CLI/docs:** see [`USAGE.md`](USAGE.md) and [`README.md`](README.md). Outputs: `images` | `pdf` | `text`. Main command: `run`.
+
 Use this file as a compact handoff for future chats or other projects. It summarizes the key architecture, implementation decisions, solved problems, and reusable patterns from this project.
 
 ## Project Purpose
 
-`ebook_capture` captures ebook pages from a target screen/window, optionally extracts OCR text using Google Gemini, and builds either a normal image PDF or a searchable PDF. It is designed for Windows, RDP, multi-monitor, and corporate network environments.
+`ebook_capture` captures ebook pages from a target screen/window, optionally runs Google Gemini OCR, and produces **image PDF** and/or **Markdown** (from structured OCR JSON). Designed for Windows, RDP, multi-monitor, and corporate network environments.
 
 Current pipeline:
 
 ```text
-Phase I   capture PNG
-Phase II  PNG -> OCR txt + OCR layout JSON (optional; searchable/text modes)
-Phase III PNG -> PDF (normal image PDF) OR OCR JSON + PNG -> searchable PDF
-Phase IV  optional TTS voice output
+run --images|pdf|text
+  job_plan → confirm (-y) → run_capture / assemble_markdown
+
+Phase I   capture PNG (images / pdf / text)
+Phase II  OCR JSON + _ocr.txt (text)
+Phase III image PDF merge (pdf)
+Assemble  OCR JSON → {title}.md (text)
 ```
 
 Main entry points:
 
-- `python -m ebook_capture capture ...`
+- `python -m ebook_capture run ...`
 - `python -m ebook_capture gui`
-- `ebook-capture capture ...` after editable install
+- `ebook-capture run ...` after editable install
 
 Current layout:
 
 ```text
 cli.py
-ebook_capture.py
-__main__.py
 core/
   config.py
+  job_plan.py / job_runner.py
   pipeline.py
   google_ocr.py
-  searchable_pdf.py
+  image_pdf.py
+  assemble_markdown.py
   screen_capture.py
   windows_util.py
   win32_bitmap_capture.py
-  tts.py
 gui/
   app.py
   snipping.py
   theme.py
   ui_capture.py
+default_config.json
 assets/
-  default_config.json
+  ocr_default_prompt.txt
   ocr_lang.csv
-  voice_lang.csv
 ```
 
 ## Core Decisions
@@ -55,12 +59,10 @@ Do not store final outputs in `tmp`. The path standard is:
 
 ```text
 output/{title}/tmp/{title}_{page:04d}.png
-output/{title}/tmp/{title}_{page:04d}.txt
 output/{title}/tmp/{title}_{page:04d}.ocr.json
-output/{title}/tmp/{title}_{page:04d}.searchable.pdf
 output/{title}/{title}.pdf
+output/{title}/{title}.md
 output/{title}/{title}_ocr.txt
-output/{title}/{title}_voice.mp3
 output/{title}/capture_state.json
 ```
 
@@ -98,7 +100,7 @@ Mouse cursor handling:
 - Implementation saves current cursor position, moves cursor outside capture rect just for screen capture, then restores it.
 - `PrintWindow` usually does not include the cursor, so this mainly matters for screen-region capture.
 
-## OCR and Searchable PDF
+## OCR and Markdown
 
 Tesseract was removed. OCR uses Google Gemini through `google-genai`.
 
@@ -117,7 +119,7 @@ GOOGLE_OCR_MODEL=gemini-2.5-flash
 Two OCR modes exist in `core/google_ocr.py`:
 
 - `extract_text_from_image(...)`: plain text OCR.
-- `extract_layout_from_image(...)`: text plus layout blocks for searchable PDF.
+- `extract_layout_from_image(...)`: structured JSON for Markdown assemble.
 
 Layout OCR output shape:
 
@@ -139,30 +141,20 @@ Layout OCR output shape:
 Rules:
 
 - `bbox` is normalized `0..1` relative to the full image.
-- OCR coordinates are top-left origin.
-- PDF coordinates are bottom-left origin, so conversion is required.
 - Prompt must request only valid JSON, no markdown fences.
 - JSON parsing should tolerate fenced output but fail clearly if no JSON object exists.
-- If layout JSON parsing keeps failing, fallback plain text OCR can still produce a coarse layout for searchable PDF continuity.
 
-Searchable PDF:
+Image PDF:
 
-- Implemented in `core/searchable_pdf.py`.
-- Uses `reportlab` to draw the original PNG as page background.
-- Adds invisible text layer with `textRenderMode(3)`.
-- Uses `PyPDF2` to merge per-page PDFs.
+- Implemented in `core/image_pdf.py`.
+- Creates image-only page PDFs from PNG.
+- Uses PNG DPI metadata for page size.
 - Final PDF path is `output/{title}/{title}.pdf`.
-- PDF page size now uses image DPI metadata (`dpi`) to preserve physical sizing across conversion.
 
-Normal PDF mode:
+Markdown:
 
-- Also implemented in `core/searchable_pdf.py` (`build_page_image_pdf`).
-- Creates image-only page PDFs without OCR JSON.
-- Uses the same DPI-aware page-size conversion as searchable PDF.
-
-Known limitation:
-
-- Gemini bbox quality may not be as exact as dedicated OCR layout engines. The code is structured so a future Google Cloud Vision OCR layout extractor could replace the Gemini layout function while keeping the same `{text, blocks}` contract.
+- `core/assemble_markdown.py` reads `tmp/*.ocr.json` and writes `{title}.md`.
+- Triggered by `run --text` (via `job_runner`).
 
 ## Google API, SSL, and Corporate Networks
 
@@ -232,31 +224,24 @@ Example:
   "outputs": {
     "final_pdf": "...",
     "combined_txt": "...",
-    "final_voice": "..."
+    "final_markdown": "..."
   }
-}
 ```
 
 Validation rules:
 
 - PNG must exist, be non-empty, and open/verify with Pillow.
-- TXT must exist.
-- OCR JSON must parse and contain a `blocks` list.
-- PDF/MP3 must exist and be non-empty.
+- OCR JSON must parse and contain expected structure.
+- PDF must exist and be non-empty.
 
 CLI patterns:
 
 ```powershell
-python -m ebook_capture capture --config assets/default_config.json --pdf-image
-python -m ebook_capture capture --config assets/default_config.json --images
-python -m ebook_capture capture --config assets/default_config.json --text
-python -m ebook_capture capture --config assets/default_config.json --pdf-searchable
-python -m ebook_capture capture --config assets/default_config.json --output-mode pdf_searchable
-python -m ebook_capture capture --config assets/default_config.json --phase capture
-python -m ebook_capture capture --config assets/default_config.json --phase ocr
-python -m ebook_capture capture --config assets/default_config.json --phase pdf
-python -m ebook_capture capture --config assets/default_config.json --phase ocr --force-phase ocr
-python -m ebook_capture capture --config assets/default_config.json --no-resume
+python -m ebook_capture run --config default_config.json --pdf -y
+python -m ebook_capture run --config default_config.json --images -y
+python -m ebook_capture run --config default_config.json --text -y
+python -m ebook_capture run --config default_config.json --text --force-phase ocr -y
+python -m ebook_capture run --config default_config.json --no-resume -y
 ```
 
 Mode defaults:
@@ -285,12 +270,12 @@ OCR_TEXT_OK
 OCR_JSON_OK
 OCR_OK
 OCR_FAIL
-Phase III: searchable PDF
+Phase III: image PDF
 PDF_PAGE_OK
 PDF_PAGE_SKIP
 PDF_OK
 PDF_FAIL
-VOICE_OK
+TEXT_OK
 DEBUG_RECT
 DEBUG_CAPTURE
 ```
@@ -325,7 +310,7 @@ pip install -e .
 Help:
 
 ```powershell
-python -m ebook_capture capture --help
+python -m ebook_capture run --help
 ```
 
 Google client smoke test:
@@ -343,19 +328,19 @@ python -c "from core.google_ocr import _client; c=_client(); r=c.models.generate
 Capture one page only:
 
 ```powershell
-python -m ebook_capture capture --config assets/default_config.json --phase capture --debug-capture --debug-max-pages 1 --title smoke_capture
+python -m ebook_capture run --config default_config.json --images --debug-capture --debug-max-pages 1 -y --title smoke_capture
 ```
 
 OCR existing PNGs:
 
 ```powershell
-python -m ebook_capture capture --config assets/default_config.json --phase ocr --title smoke_capture
+python -m ebook_capture run --config default_config.json --text --debug-max-pages 1 -y --title smoke_text
 ```
 
-Build searchable PDF from existing PNG/OCR JSON:
+Build image PDF from existing PNG:
 
 ```powershell
-python -m ebook_capture capture --config assets/default_config.json --phase pdf --title smoke_capture
+python -m ebook_capture run --config default_config.json --pdf --debug-max-pages 1 -y --title smoke_pdf
 ```
 
 Compile check:
@@ -374,7 +359,7 @@ When transferring this knowledge to another project:
 - Use per-page artifacts.
 - Use `.part` atomic writes.
 - Use a manifest, but validate files too.
-- Add `--phase`, `--resume`, and `--force-phase`.
+- Add `--force-phase`, `-y`, and `run --images|pdf|text`.
 - Keep SSL trust configurable with `auto`, `system`, `certifi`.
 - Support corporate CA files without disabling SSL verification.
 - Keep final outputs outside `tmp`.

@@ -1,6 +1,8 @@
 # ebook_capture Implementation & Reuse Guide
 
-이 문서는 `ebook_capture`에서 해결한 화면 캡처, RDP/DPI 좌표계, Google Gemini OCR, 사내망 인증서, 일반/검색 PDF, resume 가능한 파이프라인, CLI/GUI 분리, 로그 표준을 다른 프로젝트에서도 재사용할 수 있도록 정리한 구현 가이드입니다.
+> **CLI·출력 옵션:** [`USAGE.md`](USAGE.md)가 기준이다.
+
+이 문서는 `ebook_capture`에서 해결한 화면 캡처, RDP/DPI 좌표계, Google Gemini OCR, 사내망 인증서, 이미지 PDF, Markdown assemble, resume 가능한 파이프라인, CLI/GUI 분리, 로그 표준을 다른 프로젝트에서도 재사용할 수 있도록 정리한 구현 가이드입니다.
 
 ## 0. 해결한 문제와 재사용 포인트
 
@@ -13,8 +15,9 @@
 | 마우스 커서 | 캡처 이미지에 커서가 찍히는 환경 대응 | `hide_cursor_during_capture`, cursor move/restore 로직 |
 | Google OCR | Tesseract 제거, Gemini 기반 OCR, model 교체 가능 구조 | `core/google_ocr.py` |
 | 사내망 SSL | 보안 프록시/사내 CA 때문에 Google API TLS 실패 | `truststore`, `certifi`, PEM/DER `.cer` 로딩 |
-| PDF 생성 | 일반 image PDF 또는 searchable PDF 생성 | `core/searchable_pdf.py`, `reportlab` |
-| 중단 후 재실행 | 캡처/OCR/PDF 단계별 resume | `capture_state.json`, `.part` atomic write, `--phase`, `--force-phase` |
+| PDF 생성 | PNG → 이미지 PDF | `core/image_pdf.py`, `reportlab` |
+| Markdown | OCR JSON → `.md` | `core/assemble_markdown.py` |
+| 중단 후 재실행 | 캡처/OCR/PDF 단계별 resume | `capture_state.json`, `.part` atomic write, `--force-phase` |
 | CLI/GUI 분리 | GUI가 캡처 중 freeze되거나 Qt 의존성이 core에 섞이는 문제 | GUI는 `QProcess`, core는 headless pipeline |
 | 로그/디버깅 | 사용자와 개발자가 원인 추적 가능한 로그 | `DEBUG_RECT`, `IMAGE_OK`, `OCR_FAIL`, `PDF_PAGE_OK` 등 |
 
@@ -30,26 +33,22 @@
 
 ```mermaid
 flowchart LR
-  capture["Phase I: Capture PNG"] --> ocr["Phase II: OCR TXT + OCR JSON (optional)"]
-  capture --> pdf["Phase III: Normal PDF"]
-  ocr --> spdf["Phase III: Searchable PDF"]
-  pdf --> voice["Optional Phase IV: Voice"]
-  spdf --> voice
+  capture["Phase I: Capture PNG"] --> ocr["Phase II: OCR JSON (text mode)"]
+  capture --> pdf["Phase III: Image PDF (pdf mode)"]
+  ocr --> md["Assemble Markdown"]
 ```
 
 저장 경로 표준:
 
-- 임시 페이지 파일: `output/{title}/tmp/{title}_{page:04d}.png`, `.txt`, `.ocr.json`, `.searchable.pdf`
-- 최종 파일: `output/{title}/{title}.pdf`, `{title}_ocr.txt`, `{title}_voice.mp3`
+- 임시 페이지 파일: `output/{title}/tmp/{title}_{page:04d}.png`, `.ocr.json`, `.page.pdf`
+- 최종 파일: `output/{title}/{title}.pdf`, `{title}.md`, `{title}_ocr.txt`
 - 상태 파일: `output/{title}/capture_state.json`
 
-출력 모드:
+출력 모드 (`output_mode` / `run --images|pdf|text`):
 
 - `images`: PNG만 생성
-- `pdf_image`(기본): PNG + 일반 image PDF 생성
-- `text`: PNG + OCR txt/json 생성
-- `pdf_searchable`: PNG + OCR txt/json + searchable PDF 생성
-- `audio`: PNG + OCR txt + voice MP3 생성
+- `pdf`(기본): PNG + 이미지 PDF
+- `text`: OCR JSON + Markdown (`run --text` 한 번에 assemble 포함)
 
 기본 제목:
 
@@ -60,8 +59,7 @@ resume 표준:
 - 모든 page 산출물은 검증 가능한 파일 단위로 만든다.
 - 쓰기 중단에 대비해 `.part` 파일로 먼저 저장하고 `os.replace()`로 rename한다.
 - manifest만 믿지 말고 실제 파일 검증도 함께 수행한다.
-- `--phase capture|ocr|pdf|all`로 단계별 실행을 허용한다.
-- `--force-phase capture|ocr|pdf|voice|all`로 특정 단계 재생성을 허용한다.
+- `--force-phase capture|ocr|pdf|all`로 특정 단계 재생성을 허용한다.
 
 ## 1. 기본 원칙
 
@@ -96,7 +94,7 @@ from core.google_ocr import extract_layout_from_image, extract_text_from_image
 사용 기준:
 
 - plain text만 필요하면 `extract_text_from_image()`를 사용한다.
-- searchable PDF 또는 위치 기반 후처리가 필요하면 `extract_layout_from_image()`를 사용한다.
+- layout JSON 또는 위치 기반 후처리가 필요하면 `extract_layout_from_image()`를 사용한다.
 - 다른 프로젝트에서 OCR provider를 바꾸더라도 pipeline은 `{text, blocks[{text, bbox}]}` 형태만 의존하도록 유지한다.
 
 현재 기본 모델은 다음과 같다.
@@ -267,25 +265,25 @@ python -c "from core.google_ocr import _client; c=_client(); r=c.models.generate
 5. 1페이지 캡처만 확인
 
 ```powershell
-python -m ebook_capture capture --config assets/default_config.json --phase capture --debug-capture --debug-max-pages 1 --title smoke_capture
+python -m ebook_capture run --config default_config.json --images --debug-capture --debug-max-pages 1 -y --title smoke_capture
 ```
 
-6. 1페이지 OCR txt/json 확인
+6. 1페이지 OCR + Markdown (text)
 
 ```powershell
-python -m ebook_capture capture --config assets/default_config.json --phase ocr --debug-capture --debug-max-pages 1 --title smoke_ocr
+python -m ebook_capture run --config default_config.json --text --debug-capture --debug-max-pages 1 -y --title smoke_text
 ```
 
-7. 1페이지 searchable PDF 확인
+7. 1페이지 이미지 PDF 확인
 
 ```powershell
-python -m ebook_capture capture --config assets/default_config.json --phase pdf --debug-capture --debug-max-pages 1 --title smoke_pdf
+python -m ebook_capture run --config default_config.json --pdf --debug-capture --debug-max-pages 1 -y --title smoke_pdf
 ```
 
-8. 5페이지 전체 flow 확인
+8. 5페이지 PDF flow 확인
 
 ```powershell
-python -m ebook_capture capture --config assets/default_config.json --pdf-searchable --start-page 1 --pages 5 --title smoke_5p
+python -m ebook_capture run --config default_config.json --pdf --start-page 1 --pages 5 -y --title smoke_5p
 ```
 
 ## 7. OCR 구현 표준
@@ -387,7 +385,7 @@ OCR_FAIL ...
    - prompt에 `Return ONLY valid JSON`을 명시한다.
    - JSON object 추출 fallback을 두되, 실패한 page는 manifest에 `failed`로 남긴다.
 
-8. searchable PDF에서 텍스트 선택 위치가 어긋남
+8. OCR JSON bbox가 Markdown 조립 시 어긋남
    - OCR JSON의 bbox가 normalized `0..1`인지 확인한다.
    - top-left 좌표계를 PDF bottom-left 좌표계로 변환했는지 확인한다.
    - line-level bbox가 없으면 paragraph-level bbox로라도 검색 가능성을 우선 확보한다.
@@ -438,7 +436,7 @@ Google OCR은 페이지마다 Gemini API를 호출한다.
 예:
 
 ```powershell
-python -m ebook_capture capture --config assets/default_config.json --phase ocr --title "Book"
+python -m ebook_capture run --config default_config.json --text --title "Book" -y
 ```
 
 ### 10.2 보안 정책
@@ -531,8 +529,7 @@ CLI에서만 임시로 켜려면 다음 플래그를 사용한다.
 |---|---|---|---|
 | `capture` | window/manual rect | page PNG | PNG가 없거나 열 수 없으면 재실행 |
 | `ocr` | page PNG | page `.txt`, page `.ocr.json`, final `_ocr.txt` | txt/json 누락 또는 JSON parse 실패 시 재실행 |
-| `pdf` | page PNG + page OCR JSON | page searchable PDF, final PDF | page PDF 누락 또는 size 0이면 재실행 |
-| `voice` | page txt | page MP3, final MP3 | MP3 누락 시 재실행 |
+| `pdf` | page PNG | page `.page.pdf`, final PDF | page PDF 누락 또는 size 0이면 재실행 |
 
 ### 12.2 Manifest + 파일 검증
 
@@ -574,23 +571,17 @@ os.replace(part, path)
 ### 12.4 CLI 운영 패턴
 
 ```powershell
-# 기본 실행 (capture -> normal PDF)
-python -m ebook_capture capture --config assets/default_config.json --pdf-image
+# 기본 (PNG + 이미지 PDF)
+python -m ebook_capture run --config default_config.json --pdf -y
 
-# PNG만 생성
-python -m ebook_capture capture --config assets/default_config.json --images
+# PNG만
+python -m ebook_capture run --config default_config.json --images -y
 
-# OCR 텍스트만 생성
-python -m ebook_capture capture --config assets/default_config.json --text
+# OCR + Markdown
+python -m ebook_capture run --config default_config.json --text -y
 
-# searchable PDF 실행
-python -m ebook_capture capture --config assets/default_config.json --pdf-searchable
-
-# OCR만 재시도
-python -m ebook_capture capture --config assets/default_config.json --phase ocr
-
-# OCR 결과를 강제 재생성
-python -m ebook_capture capture --config assets/default_config.json --phase ocr --force-phase ocr
+# OCR/Markdown 강제 재생성
+python -m ebook_capture run --config default_config.json --text --force-phase ocr -y
 ```
 
 캡처 phase resume 주의:
@@ -604,13 +595,13 @@ python -m ebook_capture capture --config assets/default_config.json --phase ocr 
 현재 설정 확인:
 
 ```powershell
-python -c "from core.config import CaptureConfig; c=CaptureConfig.from_json_file('assets/default_config.json'); print(c.window_capture_backend, c.capture_mode, c.target_window_title, c.final_pdf_path())"
+python -c "from core.config import CaptureConfig; c=CaptureConfig.from_json_file('default_config.json'); print(c.window_capture_backend, c.capture_mode, c.target_window_title, c.final_pdf_path())"
 ```
 
-1페이지 캡처 + OCR 제외:
+1페이지 캡처만 (images):
 
 ```powershell
-python -m ebook_capture capture --config assets/default_config.json --debug-capture --debug-max-pages 1 --no-pdf --no-ocr --title debug_capture
+python -m ebook_capture run --config default_config.json --images --debug-capture --debug-max-pages 1 -y --title debug_capture
 ```
 
 Google OCR client만 테스트:
@@ -679,9 +670,8 @@ pip install -e .
 | `PDF_OK` | PDF 생성 완료 | `PDF_OK D:\...\book.pdf` |
 | `OCR_TEXT_OK` | 페이지별 OCR 텍스트 저장 완료 | `OCR_TEXT_OK page#1 D:\...\book_0001.txt` |
 | `OCR_OK` | 통합 OCR 결과 저장 완료 | `OCR_OK D:\...\book_ocr.txt` |
-| `VOICE_OK` | 음성 파일 생성 완료 | `VOICE_OK D:\...\book_voice.mp3` |
+| `TEXT_OK` | Markdown assemble 완료 | `TEXT_OK D:\...\book.md` |
 | `MISSING` | 필요한 입력 파일 없음 | `MISSING D:\...\book_0003.png` |
-| `SKIP_*` | 의도적 생략 | `SKIP_VOICE_NO_IMG D:\...\book_0003.png` |
 | `*_FAIL` | 복구 불가 실패 | `OCR_FAIL Google OCR SSL certificate verification failed...` |
 | `DEBUG_RECT` | 좌표/캡처 영역 디버그 | `DEBUG_RECT crop_screen left=...` |
 | `DEBUG_CAPTURE` | 디버그 캡처 모드 | `DEBUG_CAPTURE enabled: running 1 page(s)` |
@@ -763,12 +753,12 @@ OCR_MISSING_IMAGE page#N path
 OCR_FAIL reason
 ```
 
-#### Phase III: Searchable PDF
+#### Phase III: Image PDF
 
 필수:
 
 ```text
-Phase III: searchable PDF
+Phase III: image PDF
 PDF_PAGE_OK page#N path
 PDF_OK path
 ```
@@ -783,22 +773,6 @@ PDF_PAGE_SKIP page#N path
 
 ```text
 PDF_MISSING_IMAGE page#N path
-PDF_MISSING_OCR_JSON page#N path
-```
-
-#### Phase IV: Voice
-
-필수:
-
-```text
-Optional Phase IV: text to speech
-VOICE_OK path
-```
-
-텍스트/이미지 누락:
-
-```text
-SKIP_VOICE_NO_IMG path
 ```
 
 ### 16.6 예외 처리 기준
@@ -827,7 +801,7 @@ SKIP_VOICE_NO_IMG path
 1페이지 디버그 캡처:
 
 ```powershell
-python -m ebook_capture capture --config assets/default_config.json --debug-capture --debug-max-pages 1 --no-pdf --no-ocr --title debug_log
+python -m ebook_capture run --config default_config.json --images --debug-capture --debug-max-pages 1 -y --title debug_log
 ```
 
 Google API 연결만:
@@ -850,15 +824,16 @@ python -c "from core.google_ocr import _client; c=_client(); r=c.models.generate
 
 Google API/OCR/capture pipeline 관련 코드를 바꿀 때 확인한다.
 
-- `python -m ebook_capture capture --help`에 설명이 맞는가?
+- `python -m ebook_capture run --help`에 설명이 맞는가?
 - `python -c "from core.google_ocr import _client; print(type(_client()).__name__)"`가 성공하는가?
 - 사내망은 `GOOGLE_API_TRUST_MODE=auto` 또는 `system`에서 동작하는가?
 - open망은 `GOOGLE_API_TRUST_MODE=certifi`에서 동작 가능한가?
-- OCR 결과가 페이지별 `.txt`, `.ocr.json`과 통합 `_ocr.txt`로 저장되는가?
-- searchable PDF가 `output/{title}/{title}.pdf`로 저장되는가?
+- OCR 결과가 페이지별 `.ocr.json`과 통합 `_ocr.txt`로 저장되는가?
+- `--text` 시 `{title}.md`가 생성되는가?
+- 이미지 PDF가 `output/{title}/{title}.pdf`로 저장되는가?
 - 임시 파일이 `output/{title}/tmp/` 아래에만 생성되는가?
 - `capture_state.json` resume 상태가 정상 기록되는가?
-- `--phase ocr`, `--phase pdf`, `--force-phase ocr`가 동작하는가?
+- `--force-phase ocr` / `--force-phase pdf`가 동작하는가?
 - `pytesseract`, `TESSERACT_CMD` 문자열이 다시 들어가지 않았는가?
 
 ## 18. 다른 프로젝트로 이식할 때
@@ -871,7 +846,8 @@ Google API/OCR/capture pipeline 관련 코드를 바꿀 때 확인한다.
 |---|---|
 | Gemini API 호출과 인증서 처리 | `core/google_ocr.py`, `.env.example`의 Google 설정 |
 | Windows/RDP window capture | `core/windows_util.py`, `core/win32_bitmap_capture.py`, `core/screen_capture.py` |
-| searchable PDF | `core/searchable_pdf.py`, `reportlab`, OCR JSON schema |
+| 이미지 PDF | `core/image_pdf.py`, `reportlab` |
+| Markdown assemble | `core/assemble_markdown.py`, OCR JSON schema |
 | resume pipeline | `CaptureConfig` path helpers, `.part` write, `capture_state.json` manifest |
 | GUI subprocess pattern | `gui/app.py`의 `QProcess` 실행 구조 |
 | 운영 로그 | `IMAGE_OK`, `OCR_FAIL`, `PDF_PAGE_OK`, `DEBUG_RECT` 접두사 체계 |
@@ -883,7 +859,7 @@ Google API/OCR/capture pipeline 관련 코드를 바꿀 때 확인한다.
 3. 외부 API client 생성은 하나의 모듈로 모은다.
 4. 긴 작업은 page 단위 함수로 나누고 각 page 산출물을 독립적으로 검증한다.
 5. `.part` 파일과 manifest를 추가한다.
-6. CLI에 `--phase`, `--resume`, `--force-phase`를 추가한다.
+6. CLI에 `--force-phase`, `-y`, `run --images|pdf|text`를 사용한다.
 7. GUI가 있다면 직접 함수 호출 대신 subprocess/worker로 실행한다.
 8. smoke test는 `capture 1 page`, `ocr 1 page`, `pdf 1 page`, `resume skip` 순서로 작성한다.
 
@@ -899,18 +875,18 @@ Google API/OCR/capture pipeline 관련 코드를 바꿀 때 확인한다.
 
 ```powershell
 pip install -e .
-python -m ebook_capture capture --help
+python -m ebook_capture run --help
 python -c "from core.google_ocr import _client; print(type(_client()).__name__)"
-python -m ebook_capture capture --config assets/default_config.json --phase capture --debug-capture --debug-max-pages 1 --title smoke_capture
-python -m ebook_capture capture --config assets/default_config.json --phase ocr --debug-max-pages 1 --title smoke_capture
-python -m ebook_capture capture --config assets/default_config.json --phase pdf --debug-max-pages 1 --title smoke_capture
+python -m ebook_capture run --config default_config.json --images --debug-capture --debug-max-pages 1 -y --title smoke_capture
+python -m ebook_capture run --config default_config.json --text --debug-max-pages 1 -y --title smoke_text
+python -m ebook_capture run --config default_config.json --pdf --debug-max-pages 1 -y --title smoke_pdf
 ```
 
 성공 기준:
 
 - `output/{title}/tmp/{title}_0001.png` 생성
-- `output/{title}/tmp/{title}_0001.txt` 생성
-- `output/{title}/tmp/{title}_0001.ocr.json` 생성
-- `output/{title}/tmp/{title}_0001.searchable.pdf` 또는 `output/{title}/tmp/{title}_0001.page.pdf` 생성 (모드별)
+- `output/{title}/tmp/{title}_0001.ocr.json` 생성 (text)
+- `output/{title}/{title}.md` 생성 (text)
+- `output/{title}/tmp/{title}_0001.page.pdf` 생성 (pdf)
 - `output/{title}/{title}.pdf` 생성
 - `output/{title}/capture_state.json`에 phase별 `done` 기록

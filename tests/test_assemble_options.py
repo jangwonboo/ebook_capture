@@ -1,4 +1,4 @@
-"""Tests for assemble-md style presets."""
+"""Tests for Markdown assemble style presets."""
 
 from __future__ import annotations
 

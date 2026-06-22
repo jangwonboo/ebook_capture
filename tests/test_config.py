@@ -56,6 +56,38 @@ def test_invalid_output_mode_raises() -> None:
         normalize_output_mode("pdf_image")
 
 
+def test_json_file_allows_line_comments(tmp_path: Path) -> None:
+    path = tmp_path / "cfg.json"
+    path.write_text(
+        """
+        {
+          // book title
+          "title": "My Book",
+          "base_dir": "E:/ebook",
+          "n_pages": 2,
+          "capture_mode": "manual",
+          "rect": { "left": 1, "top": 2, "width": 100, "height": 200 }
+        }
+        """,
+        encoding="utf-8",
+    )
+    cfg = CaptureConfig.from_json_file(path)
+    assert cfg.title == "My Book"
+    assert cfg.rect.width == 100
+
+
+def test_json_file_allows_block_comments(tmp_path: Path) -> None:
+    from core.config import load_json_file
+
+    path = tmp_path / "cfg.json"
+    path.write_text(
+        '{"title": /* inline */ "T", "base_dir": "E:/x", "n_pages": 1}',
+        encoding="utf-8",
+    )
+    data = load_json_file(path)
+    assert data["title"] == "T"
+
+
 def test_assemble_style_validation() -> None:
     cfg = CaptureConfig(
         title="t",

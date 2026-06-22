@@ -8,6 +8,7 @@ from pathlib import Path
 
 from core.config import (
     CAPTURE_MANUAL,
+    CAPTURE_SCREEN_LEFT_THIRD,
     CaptureConfig,
     DEFAULT_BOOK_TITLE,
     OUTPUT_IMAGES,
@@ -21,6 +22,7 @@ from core.config import (
     Rect,
     WINDOW_CAPTURE_PRINTWINDOW,
     bundled_default_config_path,
+    is_fixed_screen_capture_mode,
     normalize_output_mode,
 )
 
@@ -115,6 +117,7 @@ def _add_capture_args(parser: argparse.ArgumentParser) -> None:
             "window_full",
             "window_left_third",
             "window_right_third",
+            CAPTURE_SCREEN_LEFT_THIRD,
         ],
         default=argparse.SUPPRESS,
     )
@@ -137,6 +140,19 @@ def _add_capture_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--height", type=int, default=None)
     parser.add_argument("--delay", type=float, dest="delay_sec", default=None)
     parser.add_argument("--next-key", dest="next_key", default=None)
+    parser.add_argument(
+        "--key-delivery",
+        dest="key_delivery",
+        choices=[
+            "auto",
+            "sendinput",
+            "postmessage",
+            "postmessage_top",
+            "pyautogui",
+        ],
+        default=None,
+        help="How to send next_key to the reader window (default from config).",
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -169,6 +185,58 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_output_args(run)
     _add_run_options(run)
 
+    test_key = sub.add_parser(
+        "test-key",
+        help="Test page-turn key: pin window/rect, send next_key once (Aladin etc.).",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  ebook-capture test-key --config default_config.json\n"
+            "  ebook-capture test-key --config default_config.json --repeat 3\n"
+            "  ebook-capture test-key --config default_config.json --screenshot\n"
+        ),
+    )
+    test_key.set_defaults(_handler=_cmd_test_key)
+    _add_book_args(test_key)
+    _add_capture_args(test_key)
+    test_key.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Send next_key N times (default 1).",
+    )
+    test_key.add_argument(
+        "--screenshot",
+        action="store_true",
+        help="Save before/after PNG of the capture rect under tmp/.",
+    )
+
+    inspect = sub.add_parser(
+        "inspect",
+        help="Check reader window position and capture rect (no capture).",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  ebook-capture inspect --config default_config.jsonc\n"
+            "  ebook-capture inspect --config default_config.jsonc --screenshot\n"
+            "  ebook-capture inspect --config default_config.jsonc --no-fit\n"
+        ),
+    )
+    inspect.set_defaults(_handler=_cmd_inspect)
+    _add_book_args(inspect)
+    _add_capture_args(inspect)
+    inspect.add_argument(
+        "--no-fit",
+        action="store_true",
+        help="Do not move/resize window; only report current rects.",
+    )
+    inspect.add_argument(
+        "--screenshot",
+        action="store_true",
+        help="Save one probe PNG of the capture rect under tmp/inspect_probe.png.",
+    )
+
     return p
 
 
@@ -195,6 +263,8 @@ def _apply_args(cfg: CaptureConfig, args: argparse.Namespace) -> CaptureConfig:
         cfg.delay_sec = float(args.delay_sec)
     if getattr(args, "next_key", None) is not None:
         cfg.next_key = str(args.next_key)
+    if getattr(args, "key_delivery", None) is not None:
+        cfg.key_delivery = str(args.key_delivery)
     if all(getattr(args, k, None) is not None for k in ("left", "top", "width", "height")):
         cfg.rect = Rect(int(args.left), int(args.top), int(args.width), int(args.height))
     if hasattr(args, "ocr_lang"):
@@ -266,6 +336,19 @@ def _resolve_config(args: argparse.Namespace) -> CaptureConfig | int:
     return 2
 
 
+def _apply_active_window_title(cfg: CaptureConfig) -> str | None:
+    from core import windows_util as wu
+
+    if cfg.capture_mode == CAPTURE_MANUAL:
+        return "--active-window needs window_* or screen_* capture mode."
+    try:
+        cfg.target_window_title = wu.print_active_window_rects()
+    except RuntimeError as exc:
+        return str(exc)
+    cfg.prefer_foreground_window_match = True
+    return None
+
+
 def _cmd_gui(_: argparse.Namespace) -> int:
     from gui.app import run_gui
 
@@ -299,6 +382,189 @@ def _cmd_run(args: argparse.Namespace) -> int:
         cfg.prefer_foreground_window_match = True
 
     return run_output_job(cfg, assume_yes=bool(getattr(args, "yes", False)))
+
+
+def _cmd_test_key(args: argparse.Namespace) -> int:
+    import time
+
+    from core.pipeline import (
+        _debug_rect_lines,
+        _pin_capture_target,
+        _screen_region,
+        _send_page_turn_key,
+    )
+    from core.screen_capture import screenshot_region
+
+    if getattr(args, "active_window", False) and sys.platform != "win32":
+        print("Error: --active-window is Windows only.", file=sys.stderr)
+        return 2
+
+    result = _resolve_config(args)
+    if isinstance(result, int):
+        return result
+    cfg = result
+
+    if getattr(args, "active_window", False):
+        from core import windows_util as wu
+
+        if cfg.capture_mode == CAPTURE_MANUAL:
+            print("Error: --active-window needs window_* or screen_* capture mode.", file=sys.stderr)
+            return 2
+        try:
+            cfg.target_window_title = wu.print_active_window_rects()
+        except RuntimeError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
+        cfg.prefer_foreground_window_match = True
+
+    try:
+        cfg.validate()
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+    repeat = max(1, int(getattr(args, "repeat", 1) or 1))
+    print(f"TEST_KEY config={getattr(args, 'config', '(cli args)')}")
+    print(f"TEST_KEY next_key={cfg.next_key!r} focus_clicks={cfg.reader_focus_clicks}")
+    print(f"TEST_KEY key_delivery={cfg.key_delivery!r}")
+    try:
+        _pin_capture_target(cfg, print)
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        print(
+            "Hint: open the Aladin reader, click it to focus, then retry. "
+            "Or use --active-window with the reader in front.",
+            file=sys.stderr,
+        )
+        return 2
+    for line in _debug_rect_lines(cfg):
+        print(line)
+
+    left, top, w, h = _screen_region(cfg)
+    before_path = None
+    if getattr(args, "screenshot", False):
+        cfg.tmp_dir().mkdir(parents=True, exist_ok=True)
+        before_path = cfg.tmp_dir() / "test_key_before.png"
+        screenshot_region(left, top, w, h).save(before_path)
+        print(f"TEST_KEY screenshot_before {before_path} size={w}x{h}")
+
+    for i in range(repeat):
+        print(f"TEST_KEY send {i + 1}/{repeat}")
+        _send_page_turn_key(cfg, print)
+        if i + 1 < repeat:
+            time.sleep(cfg.delay_sec)
+
+    if getattr(args, "screenshot", False):
+        time.sleep(cfg.delay_sec)
+        after_path = cfg.tmp_dir() / "test_key_after.png"
+        screenshot_region(left, top, w, h).save(after_path)
+        print(f"TEST_KEY screenshot_after {after_path}")
+        if before_path is not None:
+            print("TEST_KEY compare the two PNGs to confirm the page changed.")
+
+    print("TEST_KEY done")
+    return 0
+
+
+def _cmd_inspect(args: argparse.Namespace) -> int:
+    from core.pipeline import _debug_rect_lines
+    from core.screen_capture import screenshot_region
+
+    if getattr(args, "active_window", False) and sys.platform != "win32":
+        print("Error: --active-window is Windows only.", file=sys.stderr)
+        return 2
+
+    result = _resolve_config(args)
+    if isinstance(result, int):
+        return result
+    cfg = result
+
+    if getattr(args, "active_window", False):
+        err = _apply_active_window_title(cfg)
+        if err:
+            print(f"Error: {err}", file=sys.stderr)
+            return 2
+
+    try:
+        cfg.validate()
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+    from core import windows_util as wu
+
+    try:
+        hwnd, title = wu.pin_target_window(
+            cfg.target_window_title,
+            prefer_foreground=cfg.prefer_foreground_window_match,
+        )
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        print(
+            "Hint: open the reader, click it to focus, then retry inspect.",
+            file=sys.stderr,
+        )
+        return 2
+
+    cfg.pinned_target_hwnd = hwnd
+    layout_ok = True
+    print(f"INSPECT target title={title!r} hwnd=0x{hwnd:x}")
+    print(f"INSPECT capture_mode={cfg.capture_mode!r}")
+
+    if is_fixed_screen_capture_mode(cfg.capture_mode):
+        print("INSPECT --- before fit ---")
+        ok_before, before_lines = wu.describe_window_screen_left_third_fit(hwnd)
+        for line in before_lines:
+            print(line.replace("DEBUG_RECT", "INSPECT", 1))
+        if not getattr(args, "no_fit", False):
+            target = wu.screen_left_third_rect()
+            wu.fit_window_to_screen_left_third(hwnd)
+            print(
+                "INSPECT fit applied "
+                f"target_frame left={target[0]} top={target[1]} "
+                f"width={target[2]} height={target[3]}"
+            )
+            print("INSPECT --- after fit ---")
+            layout_ok, after_lines = wu.describe_window_screen_left_third_fit(hwnd)
+            for line in after_lines:
+                print(line.replace("DEBUG_RECT", "INSPECT", 1))
+        else:
+            layout_ok = ok_before
+        capture = wu.capture_rect_screen_left_third(
+            hwnd,
+            use_client_rect=cfg.use_window_client_rect,
+        )
+    else:
+        for line in _debug_rect_lines(cfg):
+            print(line.replace("DEBUG_RECT", "INSPECT", 1))
+        capture = wu.resolve_screen_rect(
+            cfg.target_window_title,
+            cfg.capture_mode,
+            use_client_rect=cfg.use_window_client_rect,
+            prefer_foreground=cfg.prefer_foreground_window_match,
+            pinned_hwnd=hwnd,
+        )
+        layout_ok = True
+
+    left, top, width, height = capture
+    cfg.pinned_capture_rect = capture
+    print(
+        "INSPECT capture_rect "
+        f"left={left} top={top} width={width} height={height} "
+        f"(right={left + width} bottom={top + height})"
+    )
+
+    if getattr(args, "screenshot", False):
+        cfg.tmp_dir().mkdir(parents=True, exist_ok=True)
+        probe = cfg.tmp_dir() / "inspect_probe.png"
+        screenshot_region(left, top, width, height).save(probe)
+        print(f"INSPECT screenshot {probe} size={width}x{height}")
+
+    if layout_ok:
+        print("INSPECT_OK reader layout matches target")
+        return 0
+    print("INSPECT_FAIL reader layout does not match target", file=sys.stderr)
+    return 1
 
 
 def main(argv: list[str] | None = None) -> int:

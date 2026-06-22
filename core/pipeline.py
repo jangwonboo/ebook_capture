@@ -18,6 +18,7 @@ from core.screen_capture import (
 from core.config import (
     CAPTURE_MANUAL,
     CaptureConfig,
+    is_fixed_screen_capture_mode,
     PHASE_CAPTURE,
     PHASE_OCR,
     PHASE_PDF,
@@ -33,8 +34,8 @@ def _emit(progress: ProgressFn | None, msg: str) -> None:
     print(msg, flush=True)
 
 
-def _screen_region(cfg: CaptureConfig) -> tuple[int, int, int, int]:
-    """Return left, top, width, height for one screenshot."""
+def _resolve_capture_region(cfg: CaptureConfig) -> tuple[int, int, int, int]:
+    """Compute capture rect without using a pinned value."""
     if cfg.capture_mode == CAPTURE_MANUAL:
         return cfg.rect.as_tuple()
     from core import windows_util as wu
@@ -46,6 +47,13 @@ def _screen_region(cfg: CaptureConfig) -> tuple[int, int, int, int]:
         prefer_foreground=cfg.prefer_foreground_window_match,
         pinned_hwnd=cfg.pinned_target_hwnd,
     )
+
+
+def _screen_region(cfg: CaptureConfig) -> tuple[int, int, int, int]:
+    """Return left, top, width, height for one screenshot."""
+    if cfg.pinned_capture_rect is not None:
+        return cfg.pinned_capture_rect
+    return _resolve_capture_region(cfg)
 
 
 def _activate_target(cfg: CaptureConfig) -> None:
@@ -78,6 +86,7 @@ def _send_page_turn_key(cfg: CaptureConfig, progress: ProgressFn | None) -> None
         prefer_foreground=cfg.prefer_foreground_window_match,
         capture_rect=(left, top, w, h),
         reader_focus_clicks=cfg.reader_focus_clicks,
+        key_delivery=cfg.key_delivery,
     )
     _emit(progress, f"TARGET_KEY_SENT key={cfg.next_key!r} ok={ok} {detail}")
 
@@ -92,6 +101,11 @@ def _debug_rect_lines(cfg: CaptureConfig) -> list[str]:
         ]
     from core import windows_util as wu
 
+    if is_fixed_screen_capture_mode(cfg.capture_mode):
+        return wu.debug_rect_lines_screen_fixed(
+            cfg.capture_mode,
+            hwnd=cfg.pinned_target_hwnd,
+        )
     return wu.debug_rect_lines_window_capture(
         cfg.target_window_title,
         cfg.capture_mode,
@@ -334,10 +348,12 @@ def _capture_one_page(
         )
 
     shot: Image.Image | None = None
-    if (
+    use_printwindow = (
         cfg.capture_mode != CAPTURE_MANUAL
+        and not is_fixed_screen_capture_mode(cfg.capture_mode)
         and cfg.window_capture_backend == WINDOW_CAPTURE_PRINTWINDOW
-    ):
+    )
+    if use_printwindow:
         import sys
 
         if sys.platform == "win32":
@@ -390,20 +406,56 @@ def _capture_one_page(
 
 
 def _pin_capture_target(cfg: CaptureConfig, progress: ProgressFn | None) -> None:
-    """Lock one HWND for the whole capture phase (avoids foreground drift to another match)."""
-    if cfg.capture_mode == CAPTURE_MANUAL:
-        return
+    """Lock HWND and capture rect for the whole capture phase."""
     from core import windows_util as wu
 
-    hwnd, title = wu.pin_target_window(
-        cfg.target_window_title,
-        prefer_foreground=cfg.prefer_foreground_window_match,
-    )
-    cfg.pinned_target_hwnd = hwnd
+    if cfg.capture_mode != CAPTURE_MANUAL:
+        hwnd, title = wu.pin_target_window(
+            cfg.target_window_title,
+            prefer_foreground=cfg.prefer_foreground_window_match,
+        )
+        cfg.pinned_target_hwnd = hwnd
+        _emit(
+            progress,
+            f"TARGET_WINDOW pinned title={title!r} hwnd=0x{hwnd:x} "
+            f"(query={cfg.target_window_title!r})",
+        )
+
+    if (
+        is_fixed_screen_capture_mode(cfg.capture_mode)
+        and cfg.pinned_target_hwnd > 0
+    ):
+        target_l, target_t, target_w, target_h = wu.screen_left_third_rect()
+        wu.fit_window_to_screen_left_third(cfg.pinned_target_hwnd)
+        _emit(
+            progress,
+            "READER_FIT moved/resized window to left third "
+            f"target_frame left={target_l} top={target_t} width={target_w} "
+            f"height={target_h}",
+        )
+        fit_ok, fit_lines = wu.describe_window_screen_left_third_fit(
+            cfg.pinned_target_hwnd
+        )
+        for line in fit_lines:
+            _emit(progress, line)
+        if not fit_ok:
+            _emit(
+                progress,
+                "READER_FIT_WARN window did not fully reach left third; "
+                "capture uses client area — check for maximized/other monitors",
+            )
+        live = wu.capture_rect_screen_left_third(
+            cfg.pinned_target_hwnd,
+            use_client_rect=cfg.use_window_client_rect,
+        )
+    else:
+        live = _resolve_capture_region(cfg)
+    cfg.pinned_capture_rect = live
+    left, top, width, height = live
     _emit(
         progress,
-        f"TARGET_WINDOW pinned title={title!r} hwnd=0x{hwnd:x} "
-        f"(query={cfg.target_window_title!r})",
+        f"CAPTURE_RECT pinned left={left} top={top} width={width} height={height} "
+        f"(right={left + width} bottom={top + height}) mode={cfg.capture_mode!r}",
     )
 
 

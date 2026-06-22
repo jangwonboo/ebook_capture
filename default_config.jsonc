@@ -37,7 +37,7 @@
   // 키 전달 방식:
   //   auto — 앱에 맞게 자동 (Chrome→PostMessage, 네이티브→SendInput 등)
   //   sendinput | postmessage | postmessage_top | pyautogui
-  "key_delivery": "auto",
+  "key_delivery": "pyautogui",
   // 키 보내기 전 본문 중앙 싱글 클릭 횟수 (0=클릭 없음, 알라딘 PC는 2 권장)
   "reader_focus_clicks": 2,
 

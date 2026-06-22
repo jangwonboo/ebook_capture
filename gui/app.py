@@ -23,6 +23,7 @@ from PyQt5.QtWidgets import (
 
 from core.config import (
     CAPTURE_MANUAL,
+    CAPTURE_SCREEN_LEFT_THIRD,
     CAPTURE_WINDOW_FULL,
     CAPTURE_WINDOW_LEFT_THIRD,
     CAPTURE_WINDOW_RIGHT_THIRD,
@@ -54,6 +55,7 @@ PRESET_MODES = (
     CAPTURE_WINDOW_FULL,
     CAPTURE_WINDOW_LEFT_THIRD,
     CAPTURE_WINDOW_RIGHT_THIRD,
+    CAPTURE_SCREEN_LEFT_THIRD,
 )
 
 OUTPUT_MODE_ITEMS = (
@@ -442,8 +444,7 @@ class CaptureDialog(QDialog):
         if not path:
             return
         try:
-            raw = json.loads(Path(path).read_text(encoding="utf-8"))
-            cfg = CaptureConfig.from_mapping(raw)
+            cfg = CaptureConfig.from_json_file(path)
         except (OSError, json.JSONDecodeError, ValueError) as e:
             QMessageBox.warning(self, "Load", f"Could not load file:\n{e}")
             return

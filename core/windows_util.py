@@ -410,12 +410,49 @@ def _reader_focus_clicks(
     return x, y
 
 
-def _deliver_vk_to_window(top_hwnd: int, vk: int, key_name: str) -> tuple[bool, str]:
-    """Deliver one key to the reader window without mouse click."""
+def _deliver_vk_to_window(
+    top_hwnd: int,
+    vk: int,
+    key_name: str,
+    *,
+    delivery: str = "auto",
+) -> tuple[bool, str]:
+    """Deliver one key to the reader window."""
+    from core.config import (
+        KEY_DELIVERY_AUTO,
+        KEY_DELIVERY_POSTMESSAGE,
+        KEY_DELIVERY_POSTMESSAGE_TOP,
+        KEY_DELIVERY_PYAUTOGUI,
+        KEY_DELIVERY_SENDINPUT,
+        normalize_key_delivery,
+    )
+
+    mode = normalize_key_delivery(delivery)
     target = _keyboard_target_hwnd(top_hwnd)
     content_hwnd = target != top_hwnd
 
-    # Chrome/Edge renderer: PostMessage with extended lParam is most reliable.
+    if mode == KEY_DELIVERY_PYAUTOGUI:
+        import pyautogui
+
+        pyautogui.press(key_name)
+        return True, "via=pyautogui"
+
+    if mode == KEY_DELIVERY_SENDINPUT:
+        if _send_vk_attached(target, vk):
+            return True, f"via=SendInput target=0x{target:x}"
+        return False, f"via=SendInput failed target=0x{target:x}"
+
+    if mode == KEY_DELIVERY_POSTMESSAGE:
+        if _postmessage_vk(target, vk):
+            return True, f"via=PostMessage target=0x{target:x}"
+        return False, f"via=PostMessage failed target=0x{target:x}"
+
+    if mode == KEY_DELIVERY_POSTMESSAGE_TOP:
+        if _postmessage_vk(top_hwnd, vk):
+            return True, f"via=PostMessage top=0x{top_hwnd:x}"
+        return False, f"via=PostMessage top failed 0x{top_hwnd:x}"
+
+    # auto: try paths best suited to browser vs native apps
     if content_hwnd and _postmessage_vk(target, vk):
         return True, f"via=PostMessage target=0x{target:x}"
 
@@ -441,6 +478,7 @@ def send_page_turn_key(
     prefer_foreground: bool = True,
     capture_rect: tuple[int, int, int, int] | None = None,
     reader_focus_clicks: int = 2,
+    key_delivery: str = "auto",
 ) -> tuple[bool, str]:
     """Activate window, optional center focus clicks, then send ``key``."""
     if sys.platform != "win32":
@@ -476,10 +514,16 @@ def send_page_turn_key(
 
     time.sleep(0.08)
     key_name = str(key).strip().lower()
-    ok, via = _deliver_vk_to_window(top_hwnd, vk, key_name)
+    ok, via = _deliver_vk_to_window(
+        top_hwnd,
+        vk,
+        key_name,
+        delivery=key_delivery,
+    )
     parts = [
         f"top=0x{top_hwnd:x}",
         f"foreground={foreground_window_title()!r}",
+        f"delivery={key_delivery!r}",
     ]
     if focus_note:
         parts.append(focus_note)
@@ -784,7 +828,7 @@ def rect_for_capture_mode(
     capture_mode: str,
 ) -> tuple[int, int, int, int]:
     """Apply horizontal third presets; vertical uses full window height."""
-    if capture_mode in ("manual", "window_full"):
+    if capture_mode in ("manual", "window_full", "screen_left_third"):
         return left, top, width, height
     if capture_mode == "window_left_third":
         w3 = max(1, width // 3)
@@ -796,6 +840,118 @@ def rect_for_capture_mode(
     return left, top, width, height
 
 
+def primary_screen_metrics() -> tuple[int, int, int, int]:
+    """Primary monitor size; origin fixed at (0, 0) for screen_left_third."""
+    if sys.platform != "win32":
+        return 0, 0, 1920, 1080
+    user32 = ctypes.windll.user32
+    width = int(user32.GetSystemMetrics(0))  # SM_CXSCREEN
+    height = int(user32.GetSystemMetrics(1))  # SM_CYSCREEN
+    return 0, 0, max(1, width), max(1, height)
+
+
+def virtual_screen_metrics() -> tuple[int, int, int, int]:
+    """Full virtual desktop (all monitors)."""
+    if sys.platform != "win32":
+        return primary_screen_metrics()
+    user32 = ctypes.windll.user32
+    left = int(user32.GetSystemMetrics(76))  # SM_XVIRTUALSCREEN
+    top = int(user32.GetSystemMetrics(77))  # SM_YVIRTUALSCREEN
+    width = int(user32.GetSystemMetrics(78))  # SM_CXVIRTUALSCREEN
+    height = int(user32.GetSystemMetrics(79))  # SM_CYVIRTUALSCREEN
+    return left, top, max(1, width), max(1, height)
+
+
+def screen_left_third_rect() -> tuple[int, int, int, int]:
+    """Target outer-window layout: (0,0), width = primary/3, height = primary full."""
+    _left, _top, sw, sh = primary_screen_metrics()
+    return 0, 0, max(1, sw // 3), sh
+
+
+def frame_screen_rect_for_hwnd(hwnd: int) -> tuple[int, int, int, int]:
+    """Outer window rect (title bar + borders) in screen pixels."""
+    if sys.platform != "win32" or hwnd <= 0:
+        raise RuntimeError("frame_screen_rect_for_hwnd requires a Windows HWND")
+    user32 = ctypes.windll.user32
+    rect = wintypes.RECT()
+    if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        raise OSError("GetWindowRect failed")
+    left, top = int(rect.left), int(rect.top)
+    width = int(rect.right - rect.left)
+    height = int(rect.bottom - rect.top)
+    if width < 1 or height < 1:
+        raise ValueError("window frame has non-positive size")
+    return left, top, width, height
+
+
+def fit_window_to_screen_left_third(hwnd: int) -> tuple[int, int, int, int]:
+    """Move/resize the reader outer window to the primary left third, full height."""
+    if sys.platform != "win32" or hwnd <= 0:
+        raise RuntimeError("fit_window_to_screen_left_third requires a Windows HWND")
+    user32 = ctypes.windll.user32
+    _left, _top, target_w, target_h = screen_left_third_rect()
+    SWP_SHOWWINDOW = 0x0040
+    user32.SetWindowPos(int(hwnd), 0, 0, 0, target_w, target_h, SWP_SHOWWINDOW)
+    time.sleep(0.2)
+    return 0, 0, target_w, target_h
+
+
+def capture_rect_screen_left_third(
+    hwnd: int,
+    *,
+    use_client_rect: bool = True,
+) -> tuple[int, int, int, int]:
+    """Capture rect after reader window is fitted to the left third."""
+    if use_client_rect:
+        return client_area_screen_rect(hwnd)
+    return frame_screen_rect_for_hwnd(hwnd)
+
+
+def describe_window_screen_left_third_fit(hwnd: int) -> tuple[bool, list[str]]:
+    """Inspect whether the reader window fills the left third after fit."""
+    target_l, target_t, target_w, target_h = screen_left_third_rect()
+    frame_l, frame_t, frame_w, frame_h = frame_screen_rect_for_hwnd(hwnd)
+    client_l, client_t, client_w, client_h = client_area_screen_rect(hwnd)
+    tol = 12
+    ok = (
+        abs(frame_l - target_l) <= tol
+        and abs(frame_t - target_t) <= tol
+        and frame_w >= target_w - 40
+        and frame_h >= target_h - 40
+    )
+    lines = [
+        "DEBUG_RECT mode=screen_left_third_fit",
+        f"DEBUG_RECT target_frame left={target_l} top={target_t} width={target_w} "
+        f"height={target_h} (right={target_l + target_w} bottom={target_t + target_h})",
+        f"DEBUG_RECT actual_frame left={frame_l} top={frame_t} width={frame_w} "
+        f"height={frame_h} (right={frame_l + frame_w} bottom={frame_t + frame_h})",
+        f"DEBUG_RECT capture_client left={client_l} top={client_t} width={client_w} "
+        f"height={client_h} (right={client_l + client_w} bottom={client_t + client_h})",
+        f"DEBUG_RECT reader_fit_ok={ok}",
+    ]
+    return ok, lines
+
+
+def debug_rect_lines_screen_fixed(capture_mode: str, hwnd: int = 0) -> list[str]:
+    """Inspect primary screen metrics and reader fit for screen_left_third."""
+    if capture_mode == "screen_left_third" and hwnd > 0:
+        _ok, lines = describe_window_screen_left_third_fit(hwnd)
+        return lines
+    pl, pt, pw, ph = primary_screen_metrics()
+    vl, vt, vw, vh = virtual_screen_metrics()
+    cl, ct, cw, ch = screen_left_third_rect()
+    return [
+        "DEBUG_RECT mode=screen_fixed",
+        f"DEBUG_RECT capture_mode={capture_mode}",
+        f"DEBUG_RECT primary_screen left={pl} top={pt} width={pw} height={ph} "
+        f"(right={pl + pw} bottom={pt + ph})",
+        f"DEBUG_RECT virtual_screen left={vl} top={vt} width={vw} height={vh} "
+        f"(right={vl + vw} bottom={vt + vh})",
+        f"DEBUG_RECT target_frame left={cl} top={ct} width={cw} height={ch} "
+        f"(right={cl + cw} bottom={ct + ch})",
+    ]
+
+
 def resolve_screen_rect(
     target_window_title: str,
     capture_mode: str,
@@ -804,7 +960,14 @@ def resolve_screen_rect(
     prefer_foreground: bool = True,
     pinned_hwnd: int = 0,
 ) -> tuple[int, int, int, int]:
-    """Live window rect adjusted for capture_mode."""
+    """Live window rect adjusted for capture_mode, or reader fit for screen_left_third."""
+    if capture_mode == "screen_left_third":
+        if pinned_hwnd > 0:
+            return capture_rect_screen_left_third(
+                pinned_hwnd,
+                use_client_rect=use_client_rect,
+            )
+        return screen_left_third_rect()
     if pinned_hwnd > 0:
         L, T, W, H = get_window_metrics_for_hwnd(
             pinned_hwnd,

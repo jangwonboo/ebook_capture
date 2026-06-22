@@ -21,15 +21,36 @@ CAPTURE_MANUAL = "manual"
 CAPTURE_WINDOW_FULL = "window_full"
 CAPTURE_WINDOW_LEFT_THIRD = "window_left_third"
 CAPTURE_WINDOW_RIGHT_THIRD = "window_right_third"
+CAPTURE_SCREEN_LEFT_THIRD = "screen_left_third"
 CAPTURE_MODES = {
     CAPTURE_MANUAL,
     CAPTURE_WINDOW_FULL,
     CAPTURE_WINDOW_LEFT_THIRD,
     CAPTURE_WINDOW_RIGHT_THIRD,
+    CAPTURE_SCREEN_LEFT_THIRD,
 }
+
+
+def is_fixed_screen_capture_mode(capture_mode: str) -> bool:
+    return capture_mode == CAPTURE_SCREEN_LEFT_THIRD
 
 WINDOW_CAPTURE_PRINTWINDOW = "printwindow"
 WINDOW_CAPTURE_SCREEN = "screen"
+
+KEY_DELIVERY_AUTO = "auto"
+KEY_DELIVERY_SENDINPUT = "sendinput"
+KEY_DELIVERY_POSTMESSAGE = "postmessage"
+KEY_DELIVERY_POSTMESSAGE_TOP = "postmessage_top"
+KEY_DELIVERY_PYAUTOGUI = "pyautogui"
+KEY_DELIVERY_MODES = frozenset(
+    {
+        KEY_DELIVERY_AUTO,
+        KEY_DELIVERY_SENDINPUT,
+        KEY_DELIVERY_POSTMESSAGE,
+        KEY_DELIVERY_POSTMESSAGE_TOP,
+        KEY_DELIVERY_PYAUTOGUI,
+    }
+)
 
 PHASE_CAPTURE = "capture"
 PHASE_OCR = "ocr"
@@ -39,6 +60,9 @@ FORCE_PHASES = {"", PHASE_CAPTURE, PHASE_OCR, PHASE_PDF, PHASE_ALL}
 
 
 def bundled_default_config_path() -> Path:
+    jsonc = PACKAGE_ROOT / "default_config.jsonc"
+    if jsonc.is_file():
+        return jsonc
     return PACKAGE_ROOT / DEFAULT_CONFIG_FILENAME
 
 
@@ -51,6 +75,64 @@ def normalize_output_mode(raw: str) -> str:
     if key in OUTPUT_MODES:
         return key
     raise ValueError(f"output_mode must be one of: {', '.join(sorted(OUTPUT_MODES))}")
+
+
+def normalize_key_delivery(raw: str) -> str:
+    key = str(raw or KEY_DELIVERY_AUTO).strip().lower()
+    if key in KEY_DELIVERY_MODES:
+        return key
+    raise ValueError(
+        "key_delivery must be one of: "
+        + ", ".join(sorted(KEY_DELIVERY_MODES))
+    )
+
+
+def strip_json_comments(text: str) -> str:
+    """Remove // and /* */ comments outside JSON strings (JSONC-style)."""
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    in_string = False
+    escape = False
+    while i < n:
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "/" and i + 1 < n:
+            nxt = text[i + 1]
+            if nxt == "/":
+                i += 2
+                while i < n and text[i] not in "\r\n":
+                    i += 1
+                continue
+            if nxt == "*":
+                i += 2
+                while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+                    i += 1
+                i = min(n, i + 2)
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def load_json_file(path: Path | str) -> Any:
+    """Load JSON from disk; ``//`` and ``/* */`` comments are allowed."""
+    text = Path(path).read_text(encoding="utf-8")
+    return json.loads(strip_json_comments(text))
 
 
 def _output_mode_from_mapping(data: Mapping[str, Any]) -> str:
@@ -91,6 +173,7 @@ class CaptureConfig:
     delay_sec: float = 1.0
     next_key: str = "pagedown"
     reader_focus_clicks: int = 2
+    key_delivery: str = KEY_DELIVERY_AUTO
     output_mode: str = OUTPUT_PDF
     skip_capture: bool = False
     resume: bool = True
@@ -101,12 +184,14 @@ class CaptureConfig:
     assemble_style: str = DEFAULT_ASSEMBLE_STYLE
     input_pdf: str = ""
     pinned_target_hwnd: int = 0
+    pinned_capture_rect: tuple[int, int, int, int] | None = None
 
     def normalize(self) -> CaptureConfig:
         self.output_mode = normalize_output_mode(self.output_mode)
         self.title = self.title.strip() or DEFAULT_BOOK_TITLE
         self.capture_mode = self.capture_mode.strip()
         self.assemble_style = self.assemble_style.strip().lower()
+        self.key_delivery = normalize_key_delivery(self.key_delivery)
         return self
 
     @property
@@ -197,7 +282,7 @@ class CaptureConfig:
         if self.capture_mode not in CAPTURE_MODES:
             raise ValueError(
                 "capture_mode must be one of: manual, window_full, "
-                "window_left_third, window_right_third"
+                "window_left_third, window_right_third, screen_left_third"
             )
         if self.n_pages < 1 or self.n_pages > 10000:
             raise ValueError("n_pages must be between 1 and 10000")
@@ -249,6 +334,7 @@ class CaptureConfig:
             )
         if self.reader_focus_clicks < 0 or self.reader_focus_clicks > 5:
             raise ValueError("reader_focus_clicks must be between 0 and 5")
+        normalize_key_delivery(self.key_delivery)
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> CaptureConfig:
@@ -282,6 +368,7 @@ class CaptureConfig:
             delay_sec=float(data.get("delay_sec", 1.0)),
             next_key=str(data.get("next_key", "pagedown")),
             reader_focus_clicks=int(data.get("reader_focus_clicks", 2)),
+            key_delivery=str(data.get("key_delivery", KEY_DELIVERY_AUTO)),
             output_mode=_output_mode_from_mapping(data),
             skip_capture=bool(data.get("skip_capture", False)),
             resume=bool(data.get("resume", True)),
@@ -296,10 +383,10 @@ class CaptureConfig:
 
     @classmethod
     def from_json_file(cls, path: Path | str) -> CaptureConfig:
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
-        return cls.from_mapping(raw)
+        return cls.from_mapping(load_json_file(path))
 
     def to_json_file(self, path: Path | str) -> None:
         data = asdict(self)
         data.pop("pinned_target_hwnd", None)
+        data.pop("pinned_capture_rect", None)
         Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")

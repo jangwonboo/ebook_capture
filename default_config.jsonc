@@ -38,7 +38,7 @@
   //   auto — 앱에 맞게 자동 (Chrome→PostMessage, 네이티브→SendInput 등)
   //   sendinput | postmessage | postmessage_top | pyautogui
   "key_delivery": "pyautogui",
-  // 키 보내기 전 본문 중앙 싱글 클릭 횟수 (0=클릭 없음, 알라딘 PC는 2 권장)
+  // 키 보내기 전 캡처 영역 좌상단 20%,20% 지점 싱글 클릭 횟수 (0=클릭 없음)
   "reader_focus_clicks": 2,
 
   // true: 중단 후 같은 명령으로 이어서 캡처

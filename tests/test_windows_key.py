@@ -33,8 +33,8 @@ def test_reader_focus_click_coords() -> None:
     pyautogui.click = FakeGui.click  # type: ignore[assignment]
     FakeGui.clicks.clear()
     x, y = _reader_focus_clicks(100, 200, 400, 800, count=2, gap_sec=0)
-    assert (x, y) == (300, 600)
-    assert FakeGui.clicks == [(300, 600), (300, 600)]
+    assert (x, y) == (180, 360)
+    assert FakeGui.clicks == [(180, 360), (180, 360)]
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Win32 only")

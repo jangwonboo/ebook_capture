@@ -396,12 +396,14 @@ def _reader_focus_clicks(
     *,
     count: int = 2,
     gap_sec: float = 0.06,
+    x_ratio: float = 0.20,
+    y_ratio: float = 0.20,
 ) -> tuple[int, int]:
-    """Two short single clicks at reader center (not a double-click)."""
+    """Two short single clicks inside the capture rect (not a double-click)."""
     import pyautogui
 
-    x = left + max(1, width // 2)
-    y = top + max(1, height // 2)
+    x = left + max(1, int(width * x_ratio))
+    y = top + max(1, int(height * y_ratio))
     clicks = max(0, int(count))
     for idx in range(clicks):
         pyautogui.click(x, y)
@@ -480,7 +482,7 @@ def send_page_turn_key(
     reader_focus_clicks: int = 2,
     key_delivery: str = "auto",
 ) -> tuple[bool, str]:
-    """Activate window, optional center focus clicks, then send ``key``."""
+    """Activate window, optional focus clicks, then send ``key``."""
     if sys.platform != "win32":
         return False, "not Windows"
     vk = _vk_for_key(key)

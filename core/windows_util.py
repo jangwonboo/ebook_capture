@@ -108,7 +108,14 @@ def is_foreground_hwnd(hwnd: int) -> bool:
 
 
 def _unlock_foreground_for_automation() -> None:
-    """Work around Windows SetForegroundWindow restrictions from background tools."""
+    """Work around Windows SetForegroundWindow restrictions from background tools.
+
+    The synthetic Alt tap is what convinces Windows this process just received
+    input. Alt also toggles menu/accelerator mode in the target app: while that
+    mode is on, a WinUI reader (Kindle desktop) routes arrow keys to its menu
+    instead of the page, so the page-turn key silently does nothing. Only use
+    this as a last resort, never on a window that is already in the foreground.
+    """
     if sys.platform != "win32":
         return
     user32, _ = _win32_modules()
@@ -125,21 +132,19 @@ def force_foreground_hwnd(hwnd: int) -> bool:
     """Bring ``hwnd`` to the foreground (Chrome/RDP need more than pygetwindow.activate)."""
     if sys.platform != "win32" or hwnd <= 0:
         return False
-    _unlock_foreground_for_automation()
     user32, kernel32 = _win32_modules()
+    if user32.GetForegroundWindow() == hwnd and not user32.IsIconic(hwnd):
+        return True
+
     SW_RESTORE = 9
     if user32.IsIconic(hwnd):
         user32.ShowWindow(hwnd, SW_RESTORE)
-    user32.ShowWindow(hwnd, SW_RESTORE)
     user32.BringWindowToTop(hwnd)
     user32.SetForegroundWindow(hwnd)
     if user32.GetForegroundWindow() == hwnd:
         return True
 
     foreground = user32.GetForegroundWindow()
-    if foreground == hwnd:
-        return True
-
     pid = wintypes.DWORD()
     fg_thread = user32.GetWindowThreadProcessId(foreground, ctypes.byref(pid))
     target_thread = user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
@@ -155,7 +160,12 @@ def force_foreground_hwnd(hwnd: int) -> bool:
             user32.AttachThreadInput(current_thread, target_thread, False)
         if attached_fg:
             user32.AttachThreadInput(current_thread, fg_thread, False)
+    if user32.GetForegroundWindow() == hwnd:
+        return True
 
+    _unlock_foreground_for_automation()
+    user32.SetForegroundWindow(hwnd)
+    user32.BringWindowToTop(hwnd)
     return user32.GetForegroundWindow() == hwnd
 
 
@@ -180,14 +190,20 @@ def focus_window_for_keyboard(hwnd: int) -> bool:
     if sys.platform != "win32" or hwnd <= 0:
         return False
     user32, _ = _win32_modules()
+    # Already active and holding its own keyboard focus: re-activating from here
+    # (SwitchToThisWindow / SetFocus) can knock a WinUI reader out of the state
+    # where it accepts page-turn keys.
+    if is_foreground_hwnd(hwnd) and has_internal_keyboard_focus(hwnd):
+        return True
     if not force_foreground_hwnd(hwnd):
         return False
-    child = find_browser_content_hwnd(hwnd)
-    focus_hwnd = child if child else hwnd
-    try:
-        user32.SetFocus(focus_hwnd)
-    except Exception:
-        pass
+    if not wait_for_internal_keyboard_focus(hwnd):
+        child = find_browser_content_hwnd(hwnd)
+        focus_hwnd = child if child else hwnd
+        try:
+            user32.SetFocus(focus_hwnd)
+        except Exception:
+            pass
     try:
         user32.SwitchToThisWindow(hwnd, True)
     except Exception:
@@ -343,6 +359,65 @@ def _keyboard_target_hwnd(top_hwnd: int) -> int:
     return find_browser_content_hwnd(top_hwnd) or top_hwnd
 
 
+class _GUITHREADINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("flags", wintypes.DWORD),
+        ("hwndActive", wintypes.HWND),
+        ("hwndFocus", wintypes.HWND),
+        ("hwndCapture", wintypes.HWND),
+        ("hwndMenuOwner", wintypes.HWND),
+        ("hwndMoveSize", wintypes.HWND),
+        ("hwndCaret", wintypes.HWND),
+        ("rcCaret", wintypes.RECT),
+    ]
+
+
+def thread_focus_hwnd(hwnd: int) -> int:
+    """HWND holding keyboard focus in the thread that owns ``hwnd`` (0 if none)."""
+    if sys.platform != "win32" or hwnd <= 0:
+        return 0
+    user32, _ = _win32_modules()
+    pid = wintypes.DWORD()
+    thread_id = int(user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid)))
+    if thread_id == 0:
+        return 0
+    info = _GUITHREADINFO()
+    info.cbSize = ctypes.sizeof(_GUITHREADINFO)
+    if not user32.GetGUIThreadInfo(thread_id, ctypes.byref(info)):
+        return 0
+    return int(info.hwndFocus or 0)
+
+
+def has_internal_keyboard_focus(hwnd: int) -> bool:
+    """True if the target's own window tree already holds keyboard focus.
+
+    WinUI 3 / UWP readers (Kindle desktop) route keys to a hidden
+    ``InputSiteWindowClass`` child. Calling ``SetFocus`` on the frame takes focus
+    away from it and the keystroke is dropped, so callers must leave focus alone.
+    """
+    focus = thread_focus_hwnd(hwnd)
+    if focus <= 0:
+        return False
+    return _root_hwnd(focus) == _root_hwnd(hwnd)
+
+
+def wait_for_internal_keyboard_focus(hwnd: int, timeout_sec: float = 0.4) -> bool:
+    """Poll ``has_internal_keyboard_focus``.
+
+    A thread only reports a focus HWND while it owns the foreground queue, and
+    that assignment lands a few milliseconds after ``SetForegroundWindow``
+    returns, so a single immediate check reads back empty.
+    """
+    deadline = time.monotonic() + max(0.0, timeout_sec)
+    while True:
+        if has_internal_keyboard_focus(hwnd):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.02)
+
+
 def _keydown_lparam(vk: int) -> int:
     user32, _ = _win32_modules()
     scan = int(user32.MapVirtualKeyW(vk, 0)) & 0xFF
@@ -368,24 +443,44 @@ def _postmessage_vk(hwnd: int, vk: int) -> bool:
     return ok_down and ok_up
 
 
-def _send_vk_attached(target_hwnd: int, vk: int) -> bool:
-    """SetFocus on target (same thread) then SendInput — no mouse click."""
+def _send_vk_attached(target_hwnd: int, vk: int) -> tuple[bool, str]:
+    """Foreground the target, then SendInput — no mouse click.
+
+    ``SetFocus`` is only used when the target's thread has no focus of its own;
+    overriding an existing focus breaks apps that host input in a child window.
+    Returns ``(ok, focus_note)``.
+    """
     if sys.platform != "win32" or target_hwnd <= 0:
-        return False
+        return False, "focus=n/a"
     user32, kernel32 = _win32_modules()
     top = _root_hwnd(target_hwnd)
     if not force_foreground_hwnd(top):
-        return False
+        return False, "focus=foreground_failed"
+    if wait_for_internal_keyboard_focus(target_hwnd):
+        focus = thread_focus_hwnd(target_hwnd)
+        return _sendinput_vk(vk), f"focus=kept@0x{focus:x}"
     target_thread = user32.GetWindowThreadProcessId(target_hwnd, None)
     current_thread = kernel32.GetCurrentThreadId()
     attached = bool(user32.AttachThreadInput(current_thread, target_thread, True))
     try:
         user32.SetFocus(target_hwnd)
         time.sleep(0.05)
-        return _sendinput_vk(vk)
+        return _sendinput_vk(vk), f"focus=setfocus attached={attached}"
     finally:
         if attached:
             user32.AttachThreadInput(current_thread, target_thread, False)
+
+
+def double_click_interval_sec(default: float = 0.5) -> float:
+    """System double-click time in seconds (``GetDoubleClickTime``)."""
+    if sys.platform != "win32":
+        return default
+    try:
+        user32, _ = _win32_modules()
+        ms = int(user32.GetDoubleClickTime())
+    except Exception:
+        return default
+    return ms / 1000.0 if ms > 0 else default
 
 
 def _reader_focus_clicks(
@@ -399,16 +494,22 @@ def _reader_focus_clicks(
     x_ratio: float = 0.20,
     y_ratio: float = 0.20,
 ) -> tuple[int, int]:
-    """Two short single clicks inside the capture rect (not a double-click)."""
+    """Repeated single clicks inside the capture rect.
+
+    Clicks land on the same point, so they must be spaced beyond the system
+    double-click time. Otherwise Windows synthesizes ``WM_LBUTTONDBLCLK`` and
+    readers act on it (Kindle zooms the page image instead of focusing it).
+    """
     import pyautogui
 
     x = left + max(1, int(width * x_ratio))
     y = top + max(1, int(height * y_ratio))
     clicks = max(0, int(count))
+    gap = max(float(gap_sec), double_click_interval_sec() + 0.05)
     for idx in range(clicks):
         pyautogui.click(x, y)
         if idx + 1 < clicks:
-            time.sleep(gap_sec)
+            time.sleep(gap)
     return x, y
 
 
@@ -440,9 +541,9 @@ def _deliver_vk_to_window(
         return True, "via=pyautogui"
 
     if mode == KEY_DELIVERY_SENDINPUT:
-        if _send_vk_attached(target, vk):
-            return True, f"via=SendInput target=0x{target:x}"
-        return False, f"via=SendInput failed target=0x{target:x}"
+        ok, focus_note = _send_vk_attached(target, vk)
+        state = "SendInput" if ok else "SendInput failed"
+        return ok, f"via={state} target=0x{target:x} {focus_note}"
 
     if mode == KEY_DELIVERY_POSTMESSAGE:
         if _postmessage_vk(target, vk):
@@ -458,8 +559,9 @@ def _deliver_vk_to_window(
     if content_hwnd and _postmessage_vk(target, vk):
         return True, f"via=PostMessage target=0x{target:x}"
 
-    if _send_vk_attached(target, vk):
-        return True, f"via=SendInput target=0x{target:x}"
+    ok, focus_note = _send_vk_attached(target, vk)
+    if ok:
+        return True, f"via=SendInput target=0x{target:x} {focus_note}"
 
     if _postmessage_vk(target, vk):
         return True, f"via=PostMessage target=0x{target:x}"
@@ -501,7 +603,11 @@ def send_page_turn_key(
     except Exception as ex:
         return False, f"activate failed: {ex}"
 
-    if not force_foreground_hwnd(_root_hwnd(top_hwnd)):
+    # Full re-activation, not just SetForegroundWindow: the capture phase injects
+    # mouse moves (cursor parking) between activation and this call, after which
+    # WinUI readers such as the Kindle app silently ignore the keystroke.
+    root = _root_hwnd(top_hwnd)
+    if not focus_window_for_keyboard(root) and not force_foreground_hwnd(root):
         return False, f"foreground failed top=0x{top_hwnd:x}"
 
     focus_note = ""

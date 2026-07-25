@@ -109,6 +109,30 @@ def page_structure_to_text(data: dict[str, Any]) -> str:
     return "\n\n".join(parts).strip()
 
 
+def _coerce_page_num(raw_page: Any, page_num: int) -> int:
+    """Use model page when it is an int; otherwise keep the pipeline page index.
+
+    Gemini sometimes returns printed/front-matter labels (``vii``, ``xii``)
+    which must not crash sanitization.
+    """
+    if raw_page is None or raw_page is False:
+        return int(page_num)
+    if isinstance(raw_page, bool):
+        return int(page_num)
+    if isinstance(raw_page, int):
+        return raw_page if raw_page > 0 else int(page_num)
+    if isinstance(raw_page, float):
+        return int(raw_page) if raw_page > 0 else int(page_num)
+    text = str(raw_page).strip()
+    if not text:
+        return int(page_num)
+    try:
+        value = int(text)
+    except ValueError:
+        return int(page_num)
+    return value if value > 0 else int(page_num)
+
+
 def sanitize_page_structure(raw: dict[str, Any], page_num: int) -> dict[str, Any]:
     sections: list[dict[str, str]] = []
     for item in raw.get("sections", []):
@@ -141,7 +165,7 @@ def sanitize_page_structure(raw: dict[str, Any], page_num: int) -> dict[str, Any
 
     text = str(raw.get("text", "")).strip() or page_structure_to_text({"sections": sections})
     return {
-        "page": int(raw.get("page") or page_num),
+        "page": _coerce_page_num(raw.get("page"), page_num),
         "text": text,
         "sections": sections,
     }

@@ -6,6 +6,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from core.config import PdfTrim
+
 
 def _load_reportlab():
     try:
@@ -26,10 +28,27 @@ def _safe_dpi(value: object) -> float:
     return dpi
 
 
-def _pdf_page_geometry(image_path: Path) -> tuple[float, float]:
-    with Image.open(image_path) as img:
-        width_px, height_px = img.size
-        dpi_meta = img.info.get("dpi", (72.0, 72.0))
+def crop_image_by_trim_ratios(img: Image.Image, trim: PdfTrim) -> Image.Image:
+    """Crop ``img`` using ratios of its current width/height."""
+    trim.validate()
+    if not trim.is_active():
+        return img
+    width_px, height_px = img.size
+    left = int(round(width_px * trim.left))
+    top = int(round(height_px * trim.top))
+    right = width_px - int(round(width_px * trim.right))
+    bottom = height_px - int(round(height_px * trim.bottom))
+    if right - left < 2 or bottom - top < 2:
+        raise ValueError(
+            f"pdf_trim leaves too little content: "
+            f"crop=({left},{top},{right},{bottom}) size={width_px}x{height_px}"
+        )
+    return img.crop((left, top, right, bottom))
+
+
+def _pdf_page_geometry_from_image(img: Image.Image) -> tuple[float, float]:
+    width_px, height_px = img.size
+    dpi_meta = img.info.get("dpi", (72.0, 72.0))
     if isinstance(dpi_meta, tuple):
         dpi_x = _safe_dpi(dpi_meta[0] if len(dpi_meta) > 0 else 72.0)
         dpi_y = _safe_dpi(dpi_meta[1] if len(dpi_meta) > 1 else dpi_x)
@@ -40,20 +59,39 @@ def _pdf_page_geometry(image_path: Path) -> tuple[float, float]:
     return width_pt, height_pt
 
 
+def _pdf_page_geometry(image_path: Path) -> tuple[float, float]:
+    with Image.open(image_path) as img:
+        return _pdf_page_geometry_from_image(img)
+
+
 def build_page_image_pdf(
     image_path: Path | str,
     output_pdf_path: Path | str,
+    *,
+    trim: PdfTrim | None = None,
 ) -> Path:
-    """Create one plain PDF page with the captured image as the full page."""
+    """Create one plain PDF page with the captured image as the full page.
+
+    ``trim`` crops margins as fractions of the capture width/height before
+    embedding (so trim scales with resolution).
+    """
     canvas_mod, ImageReader = _load_reportlab()
     image = Path(image_path)
     output = Path(output_pdf_path)
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    width, height = _pdf_page_geometry(image)
+    trim = trim or PdfTrim()
+    with Image.open(image) as src:
+        cropped = crop_image_by_trim_ratios(src, trim)
+        # Copy so we can close the source file handle before writing PDF.
+        work = cropped.copy()
+        if "dpi" in src.info:
+            work.info["dpi"] = src.info["dpi"]
+
+    width, height = _pdf_page_geometry_from_image(work)
 
     c = canvas_mod.Canvas(str(output), pagesize=(width, height))
-    c.drawImage(ImageReader(str(image)), 0, 0, width=width, height=height)
+    c.drawImage(ImageReader(work), 0, 0, width=width, height=height)
     c.showPage()
     c.save()
     return output

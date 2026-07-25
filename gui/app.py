@@ -11,6 +11,7 @@ from pathlib import Path
 import pandas as pd
 from PyQt5.QtCore import QEventLoop, QProcess, QProcessEnvironment, QRect, Qt
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QDialog,
     QMessageBox,
@@ -29,34 +30,76 @@ from core.config import (
     CAPTURE_WINDOW_RIGHT_THIRD,
     CaptureConfig,
     DEFAULT_BOOK_TITLE,
+    KEY_DELIVERY_AUTO,
+    KEY_DELIVERY_POSTMESSAGE,
+    KEY_DELIVERY_POSTMESSAGE_TOP,
+    KEY_DELIVERY_PYAUTOGUI,
+    KEY_DELIVERY_SENDINPUT,
     OUTPUT_IMAGES,
     OUTPUT_PDF,
     OUTPUT_TEXT,
+    PHASE_ALL,
+    PHASE_CAPTURE,
+    PHASE_OCR,
+    PHASE_PDF,
+    PdfTrim,
     Rect,
     WINDOW_CAPTURE_PRINTWINDOW,
+    WINDOW_CAPTURE_SCREEN,
     bundled_default_config_path,
+)
+from core.reader_profiles import (
+    apply_reader_profile,
+    get_reader_profile,
+    list_reader_profiles,
 )
 from core.windows_util import list_window_titles, window_support_available
 from gui.snipping import SnippingWidget
 from gui.ui_capture import Ui_Dialog
 
-# Maps capture.ui combo order → pyautogui key names (must match cb_next item order)
-NEXT_KEY_BY_INDEX = (
-    "pagedown",
-    "pagedown",
-    "down",
-    "right",
-    "space",
-    "enter",
+# CLI --next-key / default_config: pagedown|pageup|right|left|down|up|space|enter
+NEXT_KEY_ITEMS = (
+    ("Page Down", "pagedown"),
+    ("Page Up", "pageup"),
+    ("Right", "right"),
+    ("Left", "left"),
+    ("Down", "down"),
+    ("Up", "up"),
+    ("Space", "space"),
+    ("Enter", "enter"),
 )
 
-PRESET_MODES = (
-    CAPTURE_MANUAL,
-    CAPTURE_WINDOW_FULL,
-    CAPTURE_WINDOW_LEFT_THIRD,
-    CAPTURE_WINDOW_RIGHT_THIRD,
-    CAPTURE_SCREEN_LEFT_THIRD,
+# CLI --key-delivery
+KEY_DELIVERY_ITEMS = (
+    ("Auto", KEY_DELIVERY_AUTO),
+    ("SendInput", KEY_DELIVERY_SENDINPUT),
+    ("PostMessage", KEY_DELIVERY_POSTMESSAGE),
+    ("PostMessage (top)", KEY_DELIVERY_POSTMESSAGE_TOP),
+    ("PyAutoGUI", KEY_DELIVERY_PYAUTOGUI),
 )
+
+# CLI --force-phase
+FORCE_PHASE_ITEMS = (
+    ("(none)", ""),
+    ("capture", PHASE_CAPTURE),
+    ("ocr", PHASE_OCR),
+    ("pdf", PHASE_PDF),
+    ("all", PHASE_ALL),
+)
+
+WINDOW_BACKEND_ITEMS = (
+    ("PrintWindow", WINDOW_CAPTURE_PRINTWINDOW),
+    ("Screen (mss)", WINDOW_CAPTURE_SCREEN),
+)
+
+PRESET_MODE_ITEMS = (
+    ("Manual — drag region on screen (Region)", CAPTURE_MANUAL),
+    ("Active window — full client area", CAPTURE_WINDOW_FULL),
+    ("Active window — left 1/3 (full height)", CAPTURE_WINDOW_LEFT_THIRD),
+    ("Active window — right 1/3 (full height)", CAPTURE_WINDOW_RIGHT_THIRD),
+    ("Screen — left 1/3 (fit window, full height)", CAPTURE_SCREEN_LEFT_THIRD),
+)
+PRESET_MODES = tuple(mode for _label, mode in PRESET_MODE_ITEMS)
 
 OUTPUT_MODE_ITEMS = (
     ("Images", OUTPUT_IMAGES),
@@ -70,7 +113,8 @@ ASSEMBLE_STYLE_ITEMS = (
     ("Raw OCR (debug)", "raw"),
 )
 
-_CAPTURE_UI_SHIFT = 118
+# Extra rows under Options (key delivery / resume / force / backend)
+_OPTIONS_EXTRA_H = 100
 
 
 def _repo_root() -> Path:
@@ -86,12 +130,11 @@ def _default_output_base() -> str:
     return str(base)
 
 
-def _next_key_to_index(key: str) -> int:
-    key_l = key.lower().strip()
-    for i, k in enumerate(NEXT_KEY_BY_INDEX):
-        if k == key_l:
+def _combo_index_for_data(combo: QComboBox, value: str, default: int = 0) -> int:
+    for i in range(combo.count()):
+        if combo.itemData(i) == value:
             return i
-    return 0
+    return default
 
 
 class CaptureDialog(QDialog):
@@ -102,14 +145,19 @@ class CaptureDialog(QDialog):
         self._rect_norm: QRect | None = None
         self._proc: QProcess | None = None
         self._job_config_path: str | None = None
-        self._use_window_client_rect = True
+        self._applying_config = False
+        # CLI-only / advanced: preserved on load/save, no dedicated widgets
         self._prefer_foreground_window_match = True
         self._debug_capture = False
         self._debug_capture_max_pages = 5
-        self._window_capture_backend = WINDOW_CAPTURE_PRINTWINDOW
-        self._hide_cursor_during_capture = False
         self._ocr_text_prompt = ""
         self._ocr_prompt_file = ""
+        self._input_pdf = ""
+        self._fit_on_start = False
+        self._start_focus_clicks = 0
+        self._start_focus_x_ratio = 0.5
+        self._start_focus_y_ratio = 0.5
+        self._pdf_trim = PdfTrim()
 
         self._df_ocr = pd.read_csv(_assets_dir() / "ocr_lang.csv")
 
@@ -123,22 +171,108 @@ class CaptureDialog(QDialog):
         self.ui.sb_pages.hide()
         self.ui.btn_window.hide()
         self.ui.cb_win_titles.hide()
+        self.ui.cb_ocr_lang_sec.hide()  # CLI has a single --ocr-lang
+        self.ui.btn_nextpt.hide()
+        self.ui.lb_capture_method.hide()  # replaced by Reader row
 
-        self.gb_capture_target = QGroupBox("Target window & capture area", self)
-        self.gb_capture_target.setGeometry(
-            10, 376, 461, _CAPTURE_UI_SHIFT - 18
+        # Expand Options group for CLI-parity controls
+        self.ui.gb_options.setGeometry(10, 10, 461, 356 + _OPTIONS_EXTRA_H)
+        self.ui.btn_save.setGeometry(10, 310 + _OPTIONS_EXTRA_H, 96, 31)
+        self.ui.btn_load.setGeometry(115, 310 + _OPTIONS_EXTRA_H, 96, 31)
+
+        # Reader profile row (Kindle / Aladin / …) — applies reader behavior
+        self.lb_reader = QLabel("Reader", self.ui.gb_options)
+        self.lb_reader.setGeometry(15, 112, 56, 21)
+        self.cb_reader = QComboBox(self.ui.gb_options)
+        self.cb_reader.setGeometry(75, 108, 205, 26)
+        self.cb_reader.addItem("(custom)", "")
+        for _profile in list_reader_profiles():
+            self.cb_reader.addItem(_profile.label or _profile.name, _profile.name)
+        self.cb_reader.setToolTip(
+            "Pick a reader to apply its page-turn key, key delivery, focus clicks, etc."
         )
+        self.cb_reader.currentIndexChanged.connect(self._on_reader_changed)
+
+        self.ui.cb_next.clear()
+        for label, value in NEXT_KEY_ITEMS:
+            self.ui.cb_next.addItem(label, value)
+        self.ui.cb_next.setGeometry(75, 150, 160, 26)
+
+        self.lb_key_delivery = QLabel("Key send", self.ui.gb_options)
+        self.lb_key_delivery.setGeometry(15, 185, 56, 21)
+        self.cb_key_delivery = QComboBox(self.ui.gb_options)
+        self.cb_key_delivery.setGeometry(75, 180, 160, 26)
+        for label, value in KEY_DELIVERY_ITEMS:
+            self.cb_key_delivery.addItem(label, value)
+
+        self.lb_focus_clicks = QLabel("Focus clicks", self.ui.gb_options)
+        self.lb_focus_clicks.setGeometry(250, 185, 80, 21)
+        self.sb_focus_clicks = QSpinBox(self.ui.gb_options)
+        self.sb_focus_clicks.setGeometry(335, 180, 111, 26)
+        self.sb_focus_clicks.setRange(0, 5)
+        self.sb_focus_clicks.setValue(2)
+        self.sb_focus_clicks.setToolTip(
+            "Clicks near capture top-left before next_key (0 = none)"
+        )
+
+        self.cb_output_mode = QComboBox(self.ui.gb_options)
+        self.cb_output_mode.setGeometry(75, 215, 371, 26)
+        for label, value in OUTPUT_MODE_ITEMS:
+            self.cb_output_mode.addItem(label, value)
+        self.cb_output_mode.currentIndexChanged.connect(self._on_output_mode_changed)
+        self.ui.lb_output.setGeometry(15, 220, 46, 21)
+
+        self.lb_ocr_lang = QLabel("OCR Lang", self.ui.gb_options)
+        self.lb_ocr_lang.setGeometry(15, 255, 90, 21)
+        self.ui.cb_ocr_lang_pri.setGeometry(75, 250, 160, 26)
+
+        self.lb_assemble_style = QLabel("Markdown", self.ui.gb_options)
+        self.lb_assemble_style.setGeometry(15, 290, 56, 21)
+        self.cb_assemble_style = QComboBox(self.ui.gb_options)
+        self.cb_assemble_style.setGeometry(75, 285, 371, 26)
+        for label, value in ASSEMBLE_STYLE_ITEMS:
+            self.cb_assemble_style.addItem(label, value)
+
+        self.chk_resume = QCheckBox("Resume (skip done pages)", self.ui.gb_options)
+        self.chk_resume.setGeometry(15, 320, 200, 22)
+        self.chk_resume.setChecked(True)
+        self.chk_resume.setToolTip("Matches CLI --resume / --no-resume")
+
+        self.lb_force_phase = QLabel("Force", self.ui.gb_options)
+        self.lb_force_phase.setGeometry(230, 322, 40, 21)
+        self.cb_force_phase = QComboBox(self.ui.gb_options)
+        self.cb_force_phase.setGeometry(275, 318, 171, 26)
+        for label, value in FORCE_PHASE_ITEMS:
+            self.cb_force_phase.addItem(label, value)
+        self.cb_force_phase.setToolTip("Matches CLI --force-phase")
+
+        self.lb_win_backend = QLabel("Backend", self.ui.gb_options)
+        self.lb_win_backend.setGeometry(15, 355, 56, 21)
+        self.cb_window_backend = QComboBox(self.ui.gb_options)
+        self.cb_window_backend.setGeometry(75, 350, 160, 26)
+        for label, value in WINDOW_BACKEND_ITEMS:
+            self.cb_window_backend.addItem(label, value)
+
+        self.chk_client_rect = QCheckBox("Client area only", self.ui.gb_options)
+        self.chk_client_rect.setGeometry(250, 352, 120, 22)
+        self.chk_client_rect.setChecked(True)
+        self.chk_client_rect.setToolTip(
+            "On = client area; off = full frame (CLI --window-frame)"
+        )
+
+        self.chk_hide_cursor = QCheckBox("Hide cursor", self.ui.gb_options)
+        self.chk_hide_cursor.setGeometry(375, 352, 80, 22)
+        self.chk_hide_cursor.setToolTip("CLI --hide-cursor-during-capture")
+
+        # Capture target group sits below expanded Options
+        target_y = 20 + 356 + _OPTIONS_EXTRA_H
+        self.gb_capture_target = QGroupBox("Target window & capture area", self)
+        self.gb_capture_target.setGeometry(10, target_y, 461, 100)
 
         self.cb_region_preset = QComboBox(self.gb_capture_target)
         self.cb_region_preset.setGeometry(10, 20, 441, 26)
-        self.cb_region_preset.addItems(
-            [
-                "Manual — drag region on screen (Region)",
-                "Active window — full client area",
-                "Active window — left 1/3 (full height)",
-                "Active window — right 1/3 (full height)",
-            ]
-        )
+        for label, _mode in PRESET_MODE_ITEMS:
+            self.cb_region_preset.addItem(label)
 
         self.btn_refresh_windows = QPushButton("Refresh windows", self.gb_capture_target)
         self.btn_refresh_windows.setGeometry(10, 52, 118, 28)
@@ -161,12 +295,8 @@ class CaptureDialog(QDialog):
         self.sb_page_count.setMinimum(1)
         self.sb_page_count.setMaximum(10000)
 
-        self.ui.gb_progress.setGeometry(
-            10,
-            370 + _CAPTURE_UI_SHIFT,
-            461,
-            max(520, 656 - _CAPTURE_UI_SHIFT),
-        )
+        progress_y = target_y + 110
+        self.ui.gb_progress.setGeometry(10, progress_y, 461, 520)
 
         self.btn_refresh_windows.clicked.connect(self._refresh_window_list)
         self.cb_region_preset.currentIndexChanged.connect(self._on_preset_changed)
@@ -177,24 +307,6 @@ class CaptureDialog(QDialog):
         self.ui.le_title.setPlaceholderText(
             f"Book title — default: {DEFAULT_BOOK_TITLE}"
         )
-
-        self.cb_output_mode = QComboBox(self.ui.gb_options)
-        self.cb_output_mode.setGeometry(75, 195, 371, 26)
-        for label, value in OUTPUT_MODE_ITEMS:
-            self.cb_output_mode.addItem(label, value)
-        self.cb_output_mode.currentIndexChanged.connect(self._on_output_mode_changed)
-
-        self.lb_ocr_lang = QLabel("OCR Lang", self.ui.gb_options)
-        self.lb_ocr_lang.setGeometry(75, 230, 90, 21)
-        self.ui.cb_ocr_lang_pri.setGeometry(235, 230, 101, 26)
-        self.ui.cb_ocr_lang_sec.setGeometry(345, 230, 101, 26)
-
-        self.lb_assemble_style = QLabel("Markdown", self.ui.gb_options)
-        self.lb_assemble_style.setGeometry(15, 265, 56, 21)
-        self.cb_assemble_style = QComboBox(self.ui.gb_options)
-        self.cb_assemble_style.setGeometry(75, 260, 371, 26)
-        for label, value in ASSEMBLE_STYLE_ITEMS:
-            self.cb_assemble_style.addItem(label, value)
 
         self.btn_assemble = QPushButton("Assemble MD", self.ui.gb_progress)
         self.btn_assemble.setGeometry(170, 115, 118, 31)
@@ -215,7 +327,7 @@ class CaptureDialog(QDialog):
         self.ui.btn_cancle.clicked.connect(self._cancel_job)
 
         self.setWindowTitle("Ebook Capture")
-        self.resize(480, 1034 + _CAPTURE_UI_SHIFT)
+        self.resize(480, progress_y + 540)
 
     def _refresh_window_list(self, quiet: bool = False) -> None:
         self.cb_target_window.blockSignals(True)
@@ -245,7 +357,30 @@ class CaptureDialog(QDialog):
         needs_ocr = mode == OUTPUT_TEXT
         self.lb_ocr_lang.setVisible(needs_ocr)
         self.ui.cb_ocr_lang_pri.setVisible(needs_ocr)
-        self.ui.cb_ocr_lang_sec.setVisible(needs_ocr)
+
+    def _on_reader_changed(self, *_args: object) -> None:
+        if self._applying_config:
+            return
+        name = str(self.cb_reader.currentData() or "")
+        if not name:
+            return
+        cfg = self._config_from_widgets()
+        try:
+            notes = apply_reader_profile(cfg, name)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Reader", str(exc))
+            return
+        self._applying_config = True
+        try:
+            self._apply_config_to_widgets(cfg)
+        finally:
+            self._applying_config = False
+        self.ui.pte_status.appendPlainText(
+            f"Reader profile '{name}': {', '.join(notes)}\n"
+        )
+        profile = get_reader_profile(name)
+        if profile and profile.note:
+            self.ui.pte_status.appendPlainText(f"  ↳ {profile.note}\n")
 
     def _apply_defaults(self) -> None:
         """Load bundled ``default_config.json`` when present; else built-in fallbacks."""
@@ -260,8 +395,8 @@ class CaptureDialog(QDialog):
                 self.ui.pte_status.appendPlainText(
                     f"Loaded defaults from package: {path.name}\n\n"
                     "• Manual: Region → drag rectangle.\n"
-                    "• Window: Refresh windows → pick app → full or left/right third.\n"
-                    "• Set Start page # and Page count, then Start.\n"
+                    "• Window / screen_left_third: Refresh → pick app → Start.\n"
+                    "• Key send / Resume / Force match CLI options.\n"
                     "• After OCR: Assemble MD builds {title}.md from tmp/*.ocr.json.\n"
                 )
                 return
@@ -288,14 +423,39 @@ class CaptureDialog(QDialog):
         self.cb_region_preset.setCurrentIndex(0)
 
         self.ui.sb_delay.setValue(1.0)
-
         self.ui.cb_next.setCurrentIndex(0)
+        self.cb_key_delivery.setCurrentIndex(
+            _combo_index_for_data(self.cb_key_delivery, KEY_DELIVERY_AUTO)
+        )
+        self.sb_focus_clicks.setValue(2)
+        self.chk_resume.setChecked(True)
+        self.cb_force_phase.setCurrentIndex(0)
+        self.cb_window_backend.setCurrentIndex(
+            _combo_index_for_data(self.cb_window_backend, WINDOW_CAPTURE_PRINTWINDOW)
+        )
+        self.chk_client_rect.setChecked(True)
+        self.chk_hide_cursor.setChecked(False)
+        self.cb_reader.blockSignals(True)
+        self.cb_reader.setCurrentIndex(0)
+        self.cb_reader.blockSignals(False)
+        self._prefer_foreground_window_match = True
+        self._debug_capture = False
+        self._debug_capture_max_pages = 5
+        self._ocr_text_prompt = ""
+        self._ocr_prompt_file = ""
+        self._input_pdf = ""
+        self._fit_on_start = False
+        self._start_focus_clicks = 0
+        self._start_focus_x_ratio = 0.5
+        self._start_focus_y_ratio = 0.5
+        self._pdf_trim = PdfTrim()
+
         self.ui.pb_progress.setValue(0)
         self.ui.lb_time.setText("Ready")
 
         self.ui.pte_status.clear()
         self.ui.pte_status.appendPlainText(
-            "• Manual: Region → drag. • Window: Refresh → pick window.\n"
+            "• Manual: Region → drag. • Window / screen_left_third: Refresh → pick.\n"
             "• Start page # / Page count, then Start.\n"
         )
 
@@ -310,6 +470,12 @@ class CaptureDialog(QDialog):
         self.sb_page_count.setValue(max(1, min(cfg.n_pages, 10000)))
         self.ui.le_folder.setText(base)
 
+        self.cb_reader.blockSignals(True)
+        self.cb_reader.setCurrentIndex(
+            _combo_index_for_data(self.cb_reader, cfg.reader_profile or "")
+        )
+        self.cb_reader.blockSignals(False)
+
         try:
             pi = PRESET_MODES.index(cfg.capture_mode)
         except ValueError:
@@ -318,14 +484,28 @@ class CaptureDialog(QDialog):
         self.cb_region_preset.setCurrentIndex(pi)
         self.cb_region_preset.blockSignals(False)
 
-        self._use_window_client_rect = cfg.use_window_client_rect
+        self.chk_client_rect.setChecked(bool(cfg.use_window_client_rect))
         self._prefer_foreground_window_match = cfg.prefer_foreground_window_match
         self._debug_capture = cfg.debug_capture
         self._debug_capture_max_pages = max(1, int(cfg.debug_capture_max_pages))
-        self._window_capture_backend = cfg.window_capture_backend
-        self._hide_cursor_during_capture = cfg.hide_cursor_during_capture
+        self.cb_window_backend.setCurrentIndex(
+            _combo_index_for_data(
+                self.cb_window_backend,
+                cfg.window_capture_backend,
+                default=_combo_index_for_data(
+                    self.cb_window_backend, WINDOW_CAPTURE_PRINTWINDOW
+                ),
+            )
+        )
+        self.chk_hide_cursor.setChecked(bool(cfg.hide_cursor_during_capture))
         self._ocr_text_prompt = cfg.ocr_text_prompt
         self._ocr_prompt_file = cfg.ocr_prompt_file
+        self._input_pdf = cfg.input_pdf or ""
+        self._fit_on_start = bool(cfg.fit_on_start)
+        self._start_focus_clicks = max(0, min(int(cfg.start_focus_clicks), 5))
+        self._start_focus_x_ratio = float(cfg.start_focus_x_ratio)
+        self._start_focus_y_ratio = float(cfg.start_focus_y_ratio)
+        self._pdf_trim = cfg.pdf_trim
 
         tw = (cfg.target_window_title or "").strip()
         if tw:
@@ -338,7 +518,17 @@ class CaptureDialog(QDialog):
 
         self._on_preset_changed()
         self.ui.sb_delay.setValue(float(cfg.delay_sec))
-        self.ui.cb_next.setCurrentIndex(_next_key_to_index(cfg.next_key))
+        self.ui.cb_next.setCurrentIndex(
+            _combo_index_for_data(self.ui.cb_next, cfg.next_key.lower().strip())
+        )
+        self.cb_key_delivery.setCurrentIndex(
+            _combo_index_for_data(self.cb_key_delivery, cfg.key_delivery)
+        )
+        self.sb_focus_clicks.setValue(max(0, min(int(cfg.reader_focus_clicks), 5)))
+        self.chk_resume.setChecked(bool(cfg.resume))
+        self.cb_force_phase.setCurrentIndex(
+            _combo_index_for_data(self.cb_force_phase, cfg.force_phase or "")
+        )
         self._set_output_mode(cfg.output_mode)
         self._set_assemble_style(cfg.assemble_style)
 
@@ -347,14 +537,12 @@ class CaptureDialog(QDialog):
         for i in range(len(self._df_ocr)):
             if str(self._df_ocr.iloc[i]["code"]) == pri_code:
                 self.ui.cb_ocr_lang_pri.setCurrentIndex(i)
-                self.ui.cb_ocr_lang_sec.setCurrentIndex(i)
                 found_pri = True
                 break
         if not found_pri:
             for i in range(len(self._df_ocr)):
                 if str(self._df_ocr.iloc[i]["code"]) == "eng":
                     self.ui.cb_ocr_lang_pri.setCurrentIndex(i)
-                    self.ui.cb_ocr_lang_sec.setCurrentIndex(i)
                     break
 
         r = cfg.rect
@@ -474,8 +662,7 @@ class CaptureDialog(QDialog):
                 height=self._rect_norm.height(),
             )
 
-        idx = self.ui.cb_next.currentIndex()
-        next_key = NEXT_KEY_BY_INDEX[max(0, min(idx, len(NEXT_KEY_BY_INDEX) - 1))]
+        next_key = str(self.ui.cb_next.currentData() or "pagedown")
         pri = self.ui.cb_ocr_lang_pri.currentText()
         ocr_lang = self._ocr_code(pri) if pri else "eng"
 
@@ -488,24 +675,38 @@ class CaptureDialog(QDialog):
             title=self.ui.le_title.text().strip() or DEFAULT_BOOK_TITLE,
             n_pages=int(self.sb_page_count.value()),
             start_page=int(self.sb_start_page.value()),
-            base_dir=str(Path(self.ui.le_folder.text().strip() or _default_output_base()).expanduser()),
+            base_dir=str(
+                Path(self.ui.le_folder.text().strip() or _default_output_base()).expanduser()
+            ),
             rect=rect,
             capture_mode=capture_mode,
             target_window_title=tw,
-            use_window_client_rect=self._use_window_client_rect,
+            use_window_client_rect=self.chk_client_rect.isChecked(),
             prefer_foreground_window_match=self._prefer_foreground_window_match,
             debug_capture=self._debug_capture,
             debug_capture_max_pages=self._debug_capture_max_pages,
-            window_capture_backend=self._window_capture_backend,
-            hide_cursor_during_capture=self._hide_cursor_during_capture,
+            window_capture_backend=str(
+                self.cb_window_backend.currentData() or WINDOW_CAPTURE_PRINTWINDOW
+            ),
+            hide_cursor_during_capture=self.chk_hide_cursor.isChecked(),
             delay_sec=float(self.ui.sb_delay.value()),
             next_key=next_key,
+            reader_focus_clicks=int(self.sb_focus_clicks.value()),
+            key_delivery=str(self.cb_key_delivery.currentData() or KEY_DELIVERY_AUTO),
             output_mode=output_mode,
-            resume=True,
+            resume=self.chk_resume.isChecked(),
+            force_phase=str(self.cb_force_phase.currentData() or ""),
             ocr_lang=ocr_lang,
             ocr_text_prompt=self._ocr_text_prompt,
             ocr_prompt_file=self._ocr_prompt_file,
             assemble_style=str(self.cb_assemble_style.currentData() or "full"),
+            input_pdf=self._input_pdf,
+            reader_profile=str(self.cb_reader.currentData() or ""),
+            fit_on_start=bool(self._fit_on_start),
+            start_focus_clicks=int(self._start_focus_clicks),
+            start_focus_x_ratio=float(self._start_focus_x_ratio),
+            start_focus_y_ratio=float(self._start_focus_y_ratio),
+            pdf_trim=self._pdf_trim,
         )
         cfg.normalize()
         return cfg

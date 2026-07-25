@@ -108,6 +108,19 @@ def _add_run_options(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_capture_args(parser: argparse.ArgumentParser) -> None:
+    from core.reader_profiles import reader_profile_names
+
+    parser.add_argument(
+        "--reader",
+        dest="reader_profile",
+        choices=reader_profile_names(),
+        default=None,
+        metavar="NAME",
+        help=(
+            "Apply a reader profile (kindle_app, kindle_cloud, aladin_app, …). "
+            "Sets next_key/key_delivery/focus etc.; explicit flags still win."
+        ),
+    )
     parser.add_argument("--pages", type=int, metavar="N", default=None)
     parser.add_argument("--start-page", type=int, dest="start_page", default=None)
     parser.add_argument(
@@ -241,6 +254,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _apply_args(cfg: CaptureConfig, args: argparse.Namespace) -> CaptureConfig:
+    # Reader profile first: CLI --reader wins over cfg.reader_profile from file,
+    # and both are overridden by explicit CLI flags applied below.
+    reader = getattr(args, "reader_profile", None) or cfg.reader_profile
+    if reader:
+        from core.reader_profiles import apply_reader_profile
+
+        changed = apply_reader_profile(cfg, reader)
+        if changed:
+            print(f"Reader profile {reader!r}: {', '.join(changed)}")
+
     if getattr(args, "output_mode", None):
         cfg.output_mode = normalize_output_mode(str(args.output_mode))
     if getattr(args, "style", None):

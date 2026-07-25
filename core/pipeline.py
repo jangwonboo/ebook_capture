@@ -71,24 +71,85 @@ def _activate_target(cfg: CaptureConfig) -> None:
     )
 
 
+def _focus_reader_before_capture(
+    cfg: CaptureConfig, progress: ProgressFn | None
+) -> None:
+    """Click the page, then wait for the reader's hover overlay to fade.
+
+    Clicking gives the reader keyboard focus so the page-turn key lands, but it
+    also reveals the page arrows / toolbar. Those only disappear once the pointer
+    leaves the window, so park the pointer first and settle before capturing.
+    """
+    if cfg.capture_mode == CAPTURE_MANUAL or cfg.reader_focus_clicks <= 0:
+        return
+    from core import windows_util as wu
+
+    left, top, w, h = _screen_region(cfg)
+    if w <= 0 or h <= 0:
+        return
+    if cfg.pinned_target_hwnd > 0:
+        wu.force_foreground_hwnd(cfg.pinned_target_hwnd)
+    fx, fy = wu._reader_focus_clicks(
+        left,
+        top,
+        w,
+        h,
+        count=cfg.reader_focus_clicks,
+        x_ratio=cfg.reader_focus_x_ratio,
+        y_ratio=cfg.reader_focus_y_ratio,
+    )
+    _move_pointer_outside_capture_rect(left, top, w, h, None)
+    _emit(
+        progress,
+        f"READER_FOCUS clicks={cfg.reader_focus_clicks} @({fx},{fy}) "
+        f"ratio=({cfg.reader_focus_x_ratio:.2f},{cfg.reader_focus_y_ratio:.2f}) "
+        f"settle={cfg.focus_click_settle_sec:.1f}s",
+    )
+    time.sleep(cfg.focus_click_settle_sec)
+
+
+def _region_fingerprint(left: int, top: int, width: int, height: int):
+    """Small grayscale thumbnail used to tell whether the reader actually moved."""
+    from core.screen_capture import screenshot_region
+
+    return screenshot_region(left, top, width, height).convert("L").resize((160, 260))
+
+
+def _fingerprint_mean_diff(before, after) -> float:
+    from PIL import ImageChops
+
+    hist = ImageChops.difference(before, after).histogram()
+    total = sum(hist) or 1
+    return sum(i * count for i, count in enumerate(hist)) / total
+
+
 def _send_page_turn_key(cfg: CaptureConfig, progress: ProgressFn | None) -> None:
-    """Activate target window, focus clicks, then send next_key."""
+    """Activate target window and send next_key (focus clicks happen pre-capture)."""
     if cfg.capture_mode == CAPTURE_MANUAL:
         pyautogui.press(cfg.next_key)
         return
     from core import windows_util as wu
 
     left, top, w, h = _screen_region(cfg)
+    before = _region_fingerprint(left, top, w, h) if cfg.debug_capture else None
     ok, detail = wu.send_page_turn_key(
         cfg.next_key,
         pinned_hwnd=cfg.pinned_target_hwnd,
         title=cfg.target_window_title,
         prefer_foreground=cfg.prefer_foreground_window_match,
         capture_rect=(left, top, w, h),
-        reader_focus_clicks=cfg.reader_focus_clicks,
+        reader_focus_clicks=0,
         key_delivery=cfg.key_delivery,
     )
     _emit(progress, f"TARGET_KEY_SENT key={cfg.next_key!r} ok={ok} {detail}")
+    if before is not None:
+        time.sleep(cfg.delay_sec)
+        moved = _fingerprint_mean_diff(before, _region_fingerprint(left, top, w, h))
+        _emit(
+            progress,
+            f"DEBUG_KEY_EFFECT meandiff={moved:.2f} "
+            f"({'page moved' if moved > 3.0 else 'NO VISIBLE CHANGE'})",
+        )
 
 
 def _debug_rect_lines(cfg: CaptureConfig) -> list[str]:
@@ -153,19 +214,27 @@ def _move_pointer_outside_capture_rect(
 
     mid_x = left + max(1, width // 2)
     mid_y = top + max(1, height // 2)
+    screen_w, screen_h = pyautogui.size()
+    # Sideways first: an off-screen coordinate is clamped back onto the screen, and
+    # the clamped point often lands on the reader's own top bar, which pops up its
+    # hover toolbar and pollutes every capture.
     candidates = [
-        (mid_x, top - 24),
-        (left - 24, mid_y),
         (left + width + 24, mid_y),
+        (left - 24, mid_y),
         (mid_x, top + height + 24),
+        (mid_x, top - 24),
     ]
-    target_x = target_y = 0
     for target_x, target_y in candidates:
+        if not (0 <= target_x < screen_w and 0 <= target_y < screen_h):
+            continue
         try:
             pyautogui.moveTo(target_x, target_y, duration=0)
-            break
         except Exception:
             continue
+        now_x, now_y = pyautogui.position()
+        if left <= now_x < left + width and top <= now_y < top + height:
+            continue
+        break
     else:
         _emit(progress, "POINTER_HIDE skipped; could not move cursor outside capture area")
         return None
@@ -421,10 +490,9 @@ def _pin_capture_target(cfg: CaptureConfig, progress: ProgressFn | None) -> None
             f"(query={cfg.target_window_title!r})",
         )
 
-    if (
-        is_fixed_screen_capture_mode(cfg.capture_mode)
-        and cfg.pinned_target_hwnd > 0
-    ):
+    # Start layout: move/resize reader to primary left-third @ (0,0).
+    do_fit = bool(cfg.fit_on_start) and cfg.pinned_target_hwnd > 0
+    if do_fit:
         target_l, target_t, target_w, target_h = wu.screen_left_third_rect()
         wu.fit_window_to_screen_left_third(cfg.pinned_target_hwnd)
         _emit(
@@ -448,6 +516,12 @@ def _pin_capture_target(cfg: CaptureConfig, progress: ProgressFn | None) -> None
             cfg.pinned_target_hwnd,
             use_client_rect=cfg.use_window_client_rect,
         )
+    elif is_fixed_screen_capture_mode(cfg.capture_mode) and cfg.pinned_target_hwnd > 0:
+        # Already assumed fitted; pin client/frame of left-third layout.
+        live = wu.capture_rect_screen_left_third(
+            cfg.pinned_target_hwnd,
+            use_client_rect=cfg.use_window_client_rect,
+        )
     else:
         live = _resolve_capture_region(cfg)
     cfg.pinned_capture_rect = live
@@ -457,6 +531,27 @@ def _pin_capture_target(cfg: CaptureConfig, progress: ProgressFn | None) -> None
         f"CAPTURE_RECT pinned left={left} top={top} width={width} height={height} "
         f"(right={left + width} bottom={top + height}) mode={cfg.capture_mode!r}",
     )
+
+    # One-shot initial focus after layout (separate from per-page page-turn clicks).
+    if cfg.start_focus_clicks > 0 and width > 0 and height > 0:
+        fx, fy = wu._reader_focus_clicks(
+            left,
+            top,
+            width,
+            height,
+            count=int(cfg.start_focus_clicks),
+            x_ratio=float(cfg.start_focus_x_ratio),
+            y_ratio=float(cfg.start_focus_y_ratio),
+        )
+        _emit(
+            progress,
+            f"START_FOCUS clicks={cfg.start_focus_clicks} "
+            f"@({fx},{fy}) ratio=({cfg.start_focus_x_ratio:.2f},"
+            f"{cfg.start_focus_y_ratio:.2f})",
+        )
+        time.sleep(0.08)
+    elif cfg.start_focus_clicks == 0:
+        _emit(progress, "START_FOCUS clicks=0 (skipped)")
 
 
 def _run_phase_capture(
@@ -468,6 +563,7 @@ def _run_phase_capture(
     _emit(progress, "Phase I: capture PNG")
     _pin_capture_target(cfg, progress)
     skipped_any = False
+    settled = False
     for i, page_num in enumerate(cfg.page_numbers(n_run)):
         img_path = cfg.page_png_path(page_num)
         if _can_skip_page(
@@ -486,6 +582,13 @@ def _run_phase_capture(
                 "CAPTURE_RESUME_WARN skipped earlier pages; ensure the viewer is "
                 f"currently positioned at page#{page_num}.",
             )
+        if not settled:
+            # Readers still paint a spinner / letterboxed page right after being
+            # brought to the foreground; the first shot would capture that.
+            settled = True
+            _emit(progress, f"CAPTURE_SETTLE wait {cfg.delay_sec:.1f}s before first page")
+            time.sleep(cfg.delay_sec)
+        _focus_reader_before_capture(cfg, progress)
         try:
             shot = _capture_one_page(cfg, page_num, i, n_run, progress)
             _save_image_atomic(shot, img_path)
@@ -626,6 +729,8 @@ def _run_phase_pdf(
     from core.image_pdf import build_page_image_pdf, merge_pdfs
 
     _emit(progress, "Phase III: image PDF")
+    if cfg.pdf_trim.is_active():
+        _emit(progress, f"PDF_TRIM {cfg.pdf_trim.as_dict()}")
     page_pdfs: list[Path] = []
     try:
         for page_num in cfg.page_numbers(n_run):
@@ -646,7 +751,7 @@ def _run_phase_pdf(
                 continue
             try:
                 part = _part_path(page_pdf)
-                build_page_image_pdf(png, part)
+                build_page_image_pdf(png, part, trim=cfg.pdf_trim)
                 os.replace(part, page_pdf)
                 if not _valid_pdf(page_pdf):
                     raise RuntimeError(f"Generated invalid PDF page: {page_pdf}")
@@ -692,6 +797,12 @@ def run_capture(
 
     if cfg.run_capture_phase:
         _run_phase_capture(cfg, state, n_run, progress)
+    else:
+        _emit(
+            progress,
+            "CAPTURE_SKIP phase disabled (all required PNGs present or --skip); "
+            "use --force-phase capture or --no-resume to re-capture",
+        )
     if cfg.run_ocr_phase:
         rc = _run_phase_ocr(cfg, state, n_run, progress)
         if rc:

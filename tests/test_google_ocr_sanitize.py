@@ -36,6 +36,20 @@ def test_sanitize_normalizes_sections() -> None:
     assert result["page"] == 3
 
 
+def test_sanitize_ignores_roman_numeral_page_label() -> None:
+    raw = {
+        "page": "vii",
+        "sections": [{"type": "body", "text": "Front matter."}],
+    }
+    result = sanitize_page_structure(raw, 4)
+    assert result["page"] == 4
+
+
+def test_sanitize_accepts_numeric_string_page() -> None:
+    result = sanitize_page_structure({"page": "12", "sections": []}, 99)
+    assert result["page"] == 12
+
+
 def test_sanitize_blocks_alternate_keys() -> None:
     raw = {"blocks": [{"type": "body", "text": "From blocks key"}]}
     result = sanitize_page_structure(raw, 2)

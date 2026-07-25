@@ -51,6 +51,13 @@ def test_ocr_skip_capture() -> None:
     assert cfg.run_ocr_phase is True
 
 
+def test_pdf_phase_runs_even_when_capture_skipped() -> None:
+    """Existing PNGs: plan sets skip_capture, but PDF merge must still run."""
+    cfg = CaptureConfig(output_mode=OUTPUT_PDF, skip_capture=True)
+    assert cfg.run_capture_phase is False
+    assert cfg.run_pdf_phase is True
+
+
 def test_invalid_output_mode_raises() -> None:
     with pytest.raises(ValueError, match="output_mode"):
         normalize_output_mode("pdf_image")

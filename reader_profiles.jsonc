@@ -1,0 +1,110 @@
+{
+  // 리더별 캡처 동작 프로필.
+  // GUI "Reader" 콤보 / CLI "--reader <name>" 로 선택.
+  // 여기서 지정한 필드만 config를 덮어씀 (생략/null = 유지).
+  // CLI 개별 플래그(--next-key 등)는 프로필보다 우선.
+  //
+  // kindle_app 이 검증된 기준선. 공통 루프:
+  //   본문 중앙 클릭×2 → 포인터 대피 → settle → 캡처 → next_key → delay
+  // 리더마다 다른 것: next_key, key_delivery, target_window_title, pdf_trim, note.
+  //
+  // 필드:
+  //   capture_mode | next_key | key_delivery
+  //   reader_focus_clicks / reader_focus_x_ratio / reader_focus_y_ratio
+  //     — 각 캡처 전에 본문을 클릭해 포커스 확보 (기본 중앙 0.5, 0.5)
+  //   focus_click_settle_sec — 클릭 후 오버레이(페이지 화살표/툴바)가 사라질 대기 시간
+  //   window_capture_backend | use_window_client_rect
+  //   hide_cursor_during_capture | delay_sec | target_window_title
+  //   fit_on_start — 시작 시 창 resize (기본 false: 사용자가 미리 배치)
+  //   start_focus_clicks / start_focus_x_ratio / start_focus_y_ratio
+  //     — 시작 시 1회 포커스 클릭 (기본 0)
+  //   pdf_trim — PDF 생성 시 상하좌우 마진 crop (캡처 폭/높이 비율 0.0–0.45)
+  "profiles": [
+    {
+      "name": "kindle_app",
+      "label": "Kindle ebook reader (desktop app)",
+      "note": "검증 기준선. 중앙×2 → settle → 캡처 → right/SendInput. 상단 앱 바 trim.",
+      "capture_mode": "screen_left_third",
+      "next_key": "right",
+      "key_delivery": "sendinput",
+      "reader_focus_clicks": 2,
+      "reader_focus_x_ratio": 0.5,
+      "reader_focus_y_ratio": 0.5,
+      "focus_click_settle_sec": 1.0,
+      "window_capture_backend": "screen",
+      "use_window_client_rect": true,
+      "hide_cursor_during_capture": true,
+      "delay_sec": 2.0,
+      "target_window_title": "Kindle",
+      "fit_on_start": false,
+      "start_focus_clicks": 0,
+      "start_focus_x_ratio": 0.5,
+      "start_focus_y_ratio": 0.5,
+      // Kindle 앱 자체 상단 바(뒤로/설정/창버튼 ~48px)가 client 영역에 포함됨.
+      "pdf_trim": { "left": 0.0, "right": 0.0, "top": 0.032, "bottom": 0.0 }
+    },
+    {
+      "name": "kindle_cloud",
+      "label": "Kindle Cloud Reader (read.amazon.com, browser)",
+      "note": "kindle_app과 동일 루프. 중앙 클릭(상단은 Aa/줌). 브라우저→pyautogui. 창 제목은 GUI에서.",
+      "capture_mode": "screen_left_third",
+      "next_key": "right",
+      "key_delivery": "pyautogui",
+      "reader_focus_clicks": 2,
+      "reader_focus_x_ratio": 0.5,
+      "reader_focus_y_ratio": 0.5,
+      "focus_click_settle_sec": 1.0,
+      "window_capture_backend": "screen",
+      "use_window_client_rect": true,
+      "hide_cursor_during_capture": true,
+      "delay_sec": 2.0,
+      "fit_on_start": false,
+      "start_focus_clicks": 0,
+      "start_focus_x_ratio": 0.5,
+      "start_focus_y_ratio": 0.5,
+      "pdf_trim": { "left": 0.0, "right": 0.0, "top": 0.0, "bottom": 0.0 }
+    },
+    {
+      "name": "aladin_app",
+      "label": "Aladin ebook reader (desktop app)",
+      "note": "kindle_app과 동일 루프. PageDown/SendInput. target_window_title·pdf_trim 튜닝 필요.",
+      "capture_mode": "screen_left_third",
+      "next_key": "pagedown",
+      "key_delivery": "sendinput",
+      "reader_focus_clicks": 2,
+      "reader_focus_x_ratio": 0.5,
+      "reader_focus_y_ratio": 0.5,
+      "focus_click_settle_sec": 1.0,
+      "window_capture_backend": "screen",
+      "use_window_client_rect": true,
+      "hide_cursor_during_capture": true,
+      "delay_sec": 2.0,
+      "fit_on_start": false,
+      "start_focus_clicks": 0,
+      "start_focus_x_ratio": 0.5,
+      "start_focus_y_ratio": 0.5,
+      "pdf_trim": { "left": 0.0, "right": 0.0, "top": 0.0, "bottom": 0.0 }
+    },
+    {
+      "name": "aladin_web",
+      "label": "Aladin web viewer (browser)",
+      "note": "kindle_app과 동일 루프. PageDown/pyautogui. 창 제목은 GUI에서. pdf_trim TBD.",
+      "capture_mode": "screen_left_third",
+      "next_key": "pagedown",
+      "key_delivery": "pyautogui",
+      "reader_focus_clicks": 2,
+      "reader_focus_x_ratio": 0.5,
+      "reader_focus_y_ratio": 0.5,
+      "focus_click_settle_sec": 1.0,
+      "window_capture_backend": "screen",
+      "use_window_client_rect": true,
+      "hide_cursor_during_capture": true,
+      "delay_sec": 2.0,
+      "fit_on_start": false,
+      "start_focus_clicks": 0,
+      "start_focus_x_ratio": 0.5,
+      "start_focus_y_ratio": 0.5,
+      "pdf_trim": { "left": 0.0, "right": 0.0, "top": 0.0, "bottom": 0.0 }
+    }
+  ]
+}

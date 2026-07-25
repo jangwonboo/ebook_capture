@@ -1,7 +1,7 @@
 # Refactor — output 기준 구조
 
 **상태:** 완료  
-**사용자 매뉴얼:** [`USAGE.md`](USAGE.md)
+**사용자 매뉴얼:** [`USAGE.md`](USAGE.md) · **개발자:** [`REQUIREMENTS.md`](REQUIREMENTS.md)
 
 ---
 

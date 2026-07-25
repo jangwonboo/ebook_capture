@@ -154,6 +154,60 @@ class Rect:
 
 
 @dataclass
+class PdfTrim:
+    """PDF margin crop as fractions of capture width/height (0.0–0.45 each)."""
+
+    left: float = 0.0
+    right: float = 0.0
+    top: float = 0.0
+    bottom: float = 0.0
+
+    def as_dict(self) -> dict[str, float]:
+        return {
+            "left": float(self.left),
+            "right": float(self.right),
+            "top": float(self.top),
+            "bottom": float(self.bottom),
+        }
+
+    def is_active(self) -> bool:
+        return any(v > 0.0 for v in (self.left, self.right, self.top, self.bottom))
+
+    def validate(self) -> None:
+        for name in ("left", "right", "top", "bottom"):
+            value = float(getattr(self, name))
+            if value < 0.0 or value > 0.45:
+                raise ValueError(f"pdf_trim.{name} must be between 0.0 and 0.45")
+            setattr(self, name, value)
+        if self.left + self.right >= 1.0:
+            raise ValueError("pdf_trim.left + pdf_trim.right must be < 1.0")
+        if self.top + self.bottom >= 1.0:
+            raise ValueError("pdf_trim.top + pdf_trim.bottom must be < 1.0")
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> PdfTrim:
+        raw = data or {}
+        return cls(
+            left=float(raw.get("left", 0.0)),
+            right=float(raw.get("right", 0.0)),
+            top=float(raw.get("top", 0.0)),
+            bottom=float(raw.get("bottom", 0.0)),
+        )
+
+
+def pdf_trim_from_mapping(data: Mapping[str, Any]) -> PdfTrim:
+    """Accept nested ``pdf_trim`` or flat ``pdf_trim_*`` keys."""
+    if isinstance(data.get("pdf_trim"), Mapping):
+        return PdfTrim.from_mapping(data["pdf_trim"])  # type: ignore[arg-type]
+    return PdfTrim(
+        left=float(data.get("pdf_trim_left", 0.0)),
+        right=float(data.get("pdf_trim_right", 0.0)),
+        top=float(data.get("pdf_trim_top", 0.0)),
+        bottom=float(data.get("pdf_trim_bottom", 0.0)),
+    )
+
+
+@dataclass
 class CaptureConfig:
     """Shared CLI/GUI settings. Phases derive from ``output_mode``."""
 
@@ -172,8 +226,21 @@ class CaptureConfig:
     debug_capture_max_pages: int = 5
     delay_sec: float = 1.0
     next_key: str = "pagedown"
+    # Clicks on the page before each capture: they focus the reader and let its
+    # hover overlay (page arrows, toolbar) appear and fade before the screenshot.
     reader_focus_clicks: int = 2
+    reader_focus_x_ratio: float = 0.5
+    reader_focus_y_ratio: float = 0.5
+    focus_click_settle_sec: float = 1.0
     key_delivery: str = KEY_DELIVERY_AUTO
+    # Start-of-job layout: move/resize reader to primary left-third @ (0,0).
+    fit_on_start: bool = False
+    # One-shot focus clicks after fit (separate from per-page reader_focus_clicks).
+    start_focus_clicks: int = 0
+    start_focus_x_ratio: float = 0.5
+    start_focus_y_ratio: float = 0.5
+    # PDF crop margins as ratios of captured image size.
+    pdf_trim: PdfTrim = field(default_factory=PdfTrim)
     output_mode: str = OUTPUT_PDF
     skip_capture: bool = False
     resume: bool = True
@@ -183,6 +250,7 @@ class CaptureConfig:
     ocr_prompt_file: str = ""
     assemble_style: str = DEFAULT_ASSEMBLE_STYLE
     input_pdf: str = ""
+    reader_profile: str = ""
     pinned_target_hwnd: int = 0
     pinned_capture_rect: tuple[int, int, int, int] | None = None
 
@@ -192,6 +260,8 @@ class CaptureConfig:
         self.capture_mode = self.capture_mode.strip()
         self.assemble_style = self.assemble_style.strip().lower()
         self.key_delivery = normalize_key_delivery(self.key_delivery)
+        self.start_focus_x_ratio = float(self.start_focus_x_ratio)
+        self.start_focus_y_ratio = float(self.start_focus_y_ratio)
         return self
 
     @property
@@ -206,8 +276,7 @@ class CaptureConfig:
 
     @property
     def run_pdf_phase(self) -> bool:
-        if self.skip_capture or self.uses_pdf_input():
-            return False
+        # Independent of skip_capture: existing PNGs still need PDF merge.
         return self.output_mode == OUTPUT_PDF
 
     def output_dir(self) -> Path:
@@ -334,6 +403,20 @@ class CaptureConfig:
             )
         if self.reader_focus_clicks < 0 or self.reader_focus_clicks > 5:
             raise ValueError("reader_focus_clicks must be between 0 and 5")
+        if self.start_focus_clicks < 0 or self.start_focus_clicks > 5:
+            raise ValueError("start_focus_clicks must be between 0 and 5")
+        for name in (
+            "start_focus_x_ratio",
+            "start_focus_y_ratio",
+            "reader_focus_x_ratio",
+            "reader_focus_y_ratio",
+        ):
+            value = float(getattr(self, name))
+            if value < 0.0 or value > 1.0:
+                raise ValueError(f"{name} must be between 0.0 and 1.0")
+        if self.focus_click_settle_sec < 0.0 or self.focus_click_settle_sec > 10.0:
+            raise ValueError("focus_click_settle_sec must be between 0.0 and 10.0")
+        self.pdf_trim.validate()
         normalize_key_delivery(self.key_delivery)
 
     @classmethod
@@ -368,7 +451,15 @@ class CaptureConfig:
             delay_sec=float(data.get("delay_sec", 1.0)),
             next_key=str(data.get("next_key", "pagedown")),
             reader_focus_clicks=int(data.get("reader_focus_clicks", 2)),
+            reader_focus_x_ratio=float(data.get("reader_focus_x_ratio", 0.5)),
+            reader_focus_y_ratio=float(data.get("reader_focus_y_ratio", 0.5)),
+            focus_click_settle_sec=float(data.get("focus_click_settle_sec", 1.0)),
             key_delivery=str(data.get("key_delivery", KEY_DELIVERY_AUTO)),
+            fit_on_start=bool(data.get("fit_on_start", False)),
+            start_focus_clicks=int(data.get("start_focus_clicks", 0)),
+            start_focus_x_ratio=float(data.get("start_focus_x_ratio", 0.5)),
+            start_focus_y_ratio=float(data.get("start_focus_y_ratio", 0.5)),
+            pdf_trim=pdf_trim_from_mapping(data),
             output_mode=_output_mode_from_mapping(data),
             skip_capture=bool(data.get("skip_capture", False)),
             resume=bool(data.get("resume", True)),
@@ -378,6 +469,7 @@ class CaptureConfig:
             ocr_prompt_file=str(data.get("ocr_prompt_file", "")),
             assemble_style=str(data.get("assemble_style", DEFAULT_ASSEMBLE_STYLE)),
             input_pdf=str(data.get("input_pdf", "")),
+            reader_profile=str(data.get("reader_profile", "")),
         )
         return cfg.normalize()
 
@@ -389,4 +481,5 @@ class CaptureConfig:
         data = asdict(self)
         data.pop("pinned_target_hwnd", None)
         data.pop("pinned_capture_rect", None)
+        # Nested PdfTrim already serializes via asdict
         Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")

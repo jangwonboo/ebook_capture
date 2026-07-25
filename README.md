@@ -2,7 +2,11 @@
 
 화면의 고정 영역(또는 지정 창)을 연속 캡처해 PNG를 모으고, 선택에 따라 **이미지 PDF** 또는 **Google Gemini OCR + Markdown**까지 만드는 도구입니다. CLI와 PyQt5 GUI를 제공합니다.
 
-**상세 사용법:** [`USAGE.md`](USAGE.md)
+| 문서 | 대상 |
+|------|------|
+| [USAGE.md](USAGE.md) | **사용자** — 설치 후 사용법, 옵션, 리더 프로필 |
+| [REQUIREMENTS.md](REQUIREMENTS.md) | **개발자** — 요구사항, 아키텍처, 파이프라인, 문제/해결책 |
+| [CONTEXT.md](CONTEXT.md) | **다음 세션** — Kindle 검증 상태, 다른 리더 튜닝 TODO |
 
 ## 출력 3종
 
@@ -16,31 +20,15 @@
 
 ## 프로젝트 구성
 
+```text
+cli.py                         # gui | run | test-key | inspect
+default_config.jsonc           # 기본 CaptureConfig
+reader_profiles.jsonc          # Kindle / Aladin 등 리더 동작
+assets/                        # OCR 프롬프트, 언어 CSV
+core/                          # 캡처 · OCR · PDF · assemble (Qt 없음)
+gui/                           # PyQt → run -y 서브프로세스
+tests/
 ```
-cli.py                         # gui | run
-default_config.json            # bundled 기본 설정 (CaptureConfig)
-assets/
-  ocr_default_prompt.txt       # Gemini OCR 기본 프롬프트
-  ocr_lang.csv                 # OCR 언어 힌트 목록
-core/
-  config.py                    # CaptureConfig (JSON 직렬화)
-  job_plan.py / job_runner.py  # 산출물 분석 · 단계 확인 · 실행
-  pipeline.py                  # 캡처 · OCR · PDF (Qt 없음)
-  google_ocr.py                # Google Gemini OCR
-  image_pdf.py                 # PNG → 이미지 PDF
-  assemble_*.py                # OCR JSON → Markdown
-gui/
-  app.py                       # PyQt 다이얼로그 → `run -y` 서브프로세스
-tests/                         # pytest
-```
-
-### 설계 요약
-
-| 레이어 | 역할 |
-|--------|------|
-| **core** | Win32/pyautogui 캡처, Gemini OCR, PDF/Markdown 생성. GUI 없이 동작. |
-| **cli** | `run`: `--images` / `--pdf` / `--text`. 필요 단계를 분석해 사용자 확인 후 실행. |
-| **gui** | 옵션을 JSON으로 저장하고 `python -m ebook_capture run -y --config …`를 **서브프로세스**로 실행. |
 
 ```mermaid
 flowchart LR
@@ -61,7 +49,7 @@ pip install -e .
 pip install -e ".[dev]"
 ```
 
-Python **3.10+** 권장.
+Python **3.10+** 권장. Windows 캡처·창 제어가 주 대상입니다.
 
 ## 빠른 시작
 
@@ -69,50 +57,37 @@ Python **3.10+** 권장.
 
 ```bash
 python -m ebook_capture gui
-# 또는 (editable 설치 후)
-ebook-capture gui
 ```
 
-1. **Folder**: 출력 상위 폴더 (절대 경로).
-2. **Title**, **Pages**: 책 제목과 페이지 수.
-3. **Output**: Images / PDF / Text (OCR).
-4. **Start**: `run -y` 서브프로세스 실행. Text 모드는 OCR + Markdown까지 포함.
+1. **Reader**에서 Kindle / Aladin 등 선택  
+2. **Folder / Title / Pages**, 대상 창 선택  
+3. **Output** → **Start**
 
 ### CLI
 
 ```bash
-python -m ebook_capture run --config default_config.json --pdf
+python -m ebook_capture run --config default_config.jsonc --reader kindle_app --pdf -y
 python -m ebook_capture run --title "My Book" --base-dir E:/ebook --text -y
 ```
 
-중간 산출물(PNG, PDF, OCR JSON 등)이 없으면 **실행할 단계 목록**을 보여 주고 확인을 받습니다. 스크립트·GUI는 `-y`로 건너뜁니다.
-
-```bash
-python -m ebook_capture run --help
-```
+중간 산출물이 없으면 실행 단계를 보여 주고 확인합니다. `-y`로 생략합니다.
 
 ## 저장 경로
 
-```
+```text
 {base_dir}/{title}/
   tmp/{title}_0001.png
   tmp/{title}_0001.ocr.json
   {title}.pdf
   {title}.md
-  {title}_structure.json
-  capture_state.json          # resume 상태
+  capture_state.json
 ```
 
-## 환경 변수
+## 환경 변수 (OCR)
 
-- **Google OCR**: `.env` 또는 환경 변수에 `GOOGLE_API_KEY`. `python-dotenv` + `google-genai` 사용.
-  - 사내망: `GOOGLE_API_TRUST_MODE=auto` (Windows 인증서 저장소 우선).
-  - open망: `GOOGLE_API_TRUST_MODE=certifi`.
-  - 필요 시 `GOOGLE_API_CA_BUNDLE=<CA .cer/.pem>`.
+- `GOOGLE_API_KEY` — Gemini OCR (`--text`)에 필요  
+- `GOOGLE_API_TRUST_MODE` — `auto` | `system`(사내망) | `certifi`  
 - 예시: [`.env.example`](.env.example)
-
-구현·SSL·캡처 백엔드·resume 등 내부 가이드: [`GUIDE.md`](GUIDE.md)  
-CLI/GUI 흐름: [`FLOW.md`](FLOW.md)
 
 ## 라이선스
 

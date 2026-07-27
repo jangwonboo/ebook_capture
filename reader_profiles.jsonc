@@ -18,7 +18,9 @@
   //   fit_on_start — 시작 시 창 resize (기본 false: 사용자가 미리 배치)
   //   start_focus_clicks / start_focus_x_ratio / start_focus_y_ratio
   //     — 시작 시 1회 포커스 클릭 (기본 0)
-  //   pdf_trim — PDF 생성 시 상하좌우 마진 crop (캡처 폭/높이 비율 0.0–0.45)
+  //   pdf_trim — PDF 생성 시 마진 처리 (캡처 폭/높이 비율 0.0–0.45)
+  //     left/right/top/bottom: crop
+  //     fill_top/fill_bottom: crop 안쪽 띠를 white fill (툴바 등, 높이 유지)
   "profiles": [
     {
       "name": "kindle_app",
@@ -67,7 +69,7 @@
     {
       "name": "aladin_app",
       "label": "Aladin ebook reader (desktop app)",
-      "note": "kindle_app과 동일 루프. PageDown/SendInput. target_window_title·pdf_trim 튜닝 필요.",
+      "note": "창 제목=책이름(책 config). PageDown/SendInput. 상단 title crop + toolbar white-fill, 하단 nav crop.",
       "capture_mode": "screen_left_third",
       "next_key": "pagedown",
       "key_delivery": "sendinput",
@@ -83,7 +85,15 @@
       "start_focus_clicks": 0,
       "start_focus_x_ratio": 0.5,
       "start_focus_y_ratio": 0.5,
-      "pdf_trim": { "left": 0.0, "right": 0.0, "top": 0.0, "bottom": 0.0 }
+      // 1761px: title~18px crop, toolbar+pad~45px white-fill, bottom nav~80px crop
+      "pdf_trim": {
+        "left": 0.0,
+        "right": 0.0,
+        "top": 0.010,
+        "bottom": 0.045,
+        "fill_top": 0.026,
+        "fill_bottom": 0.0
+      }
     },
     {
       "name": "aladin_web",

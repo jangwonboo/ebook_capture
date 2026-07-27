@@ -95,7 +95,7 @@ python -m ebook_capture run --title Book --base-dir E:\ebook --text --input-pdf 
 | `reader_focus_clicks` | 2 | 캡처 **직전** 본문 클릭 |
 | `reader_focus_x_ratio` / `_y_ratio` | 0.5 / 0.5 | 클릭 위치 (본문 중앙) |
 | `focus_click_settle_sec` | 1.0 | 클릭 후 오버레이 사라질 대기 |
-| `pdf_trim` | 0 (`kindle_app`만 top=0.032) | PDF 여백 crop (캡처 크기 **비율**) |
+| `pdf_trim` | Kindle top=0.032 / Aladin top=0.010·fill_top=0.026·bottom=0.045 | crop + optional white-fill |
 
 페이지 한 장의 처리 순서는 다음과 같습니다.
 
@@ -108,9 +108,10 @@ python -m ebook_capture run --title Book --base-dir E:\ebook --text --input-pdf 
 벌려 보냅니다. 그래서 `reader_focus_clicks: 2`도 더블클릭(= Kindle 이미지 줌)이 되지 않습니다.
 클릭 위치는 중앙이 안전합니다. 상단은 툴바, 좌우 가장자리는 페이지 이동 영역입니다.
 
-`kindle_app`만 예외로 `pdf_trim.top = 0.032`입니다. Kindle 앱은 자기 상단 바(뒤로·설정·창
-버튼, 약 48px)를 client 영역 안에 그리기 때문에 캡처에 항상 들어옵니다. 창 높이를 크게
-바꿨다면 이 비율도 다시 맞추세요. 다른 리더의 `pdf_trim`은 첫 클린 캡처 후 측정해 넣으세요.
+`kindle_app`은 `pdf_trim.top = 0.032`(앱 상단 바 crop). `aladin_app`은
+`top = 0.010`(얇은 title strip crop) + `fill_top = 0.026`(툴바 **white fill**) +
+`bottom = 0.045`(하단 nav crop). `fill_*`는 잘라내지 않고 해당 띠만 흰색으로
+덮어 상단 여백을 유지합니다. 창 높이를 크게 바꿨다면 비율을 다시 맞추세요.
 
 ```powershell
 ebook-capture run --config default_config.jsonc --reader kindle_app -y
@@ -199,28 +200,42 @@ python -m ebook_capture run --config default_config.jsonc --reader kindle_app --
 
 ## 6. 설정 파일
 
-번들 기본: `default_config.jsonc` (없으면 `default_config.json`).
+설정을 둘로 나눕니다.
 
-자주 쓰는 필드:
+| 파일 | 역할 |
+|------|------|
+| `default_config.jsonc` (책) | 제목·쪽수·출력·resume 등 **이번 잡** |
+| `reader_profiles.jsonc` (리더) | 클릭·키·delay·`pdf_trim` 등 **리더 동작** |
+
+번들 책 기본: `default_config.jsonc` (없으면 `default_config.json`).  
+리더 동작은 `reader_profile` 이름 또는 CLI `--reader`로 고릅니다.
+
+### 책 config에 두는 필드
 
 | 필드 | 설명 |
 |------|------|
-| `output_mode` | `images` \| `pdf` \| `text` |
-| `reader_profile` | 예: `kindle_app` |
 | `title`, `base_dir`, `n_pages`, `start_page` | 책·경로 |
-| `capture_mode`, `target_window_title` | 캡처 대상 |
-| `next_key`, `key_delivery`, `delay_sec` | 페이지 넘김 |
-| `fit_on_start`, `start_focus_clicks` | 시작 맞춤·포커스 |
-| `pdf_trim` | `{ "left", "right", "top", "bottom" }` 비율 |
+| `output_mode` | `images` \| `pdf` \| `text` |
+| `reader_profile` | 예: `kindle_app` / `aladin_app` (이름만) |
+| `target_window_title` | (선택) Aladin처럼 **창 제목이 책 이름**일 때 책 config에 둠 |
 | `resume`, `force_phase` | 재개 / 강제 |
 | `ocr_lang`, `assemble_style` | text 모드 |
 
-CLI 플래그가 JSON 값을 덮어씁니다.
+### 리더 config에 두는 필드 (`reader_profiles.jsonc`)
 
-PDF 여백 예 (폭 1000px, `left: 0.02` → 20px 잘림):
+`capture_mode`, `target_window_title`, `next_key`, `key_delivery`, `delay_sec`,  
+`reader_focus_*`, `fit_on_start`, `pdf_trim`, `window_capture_backend` 등.
+
+우선순위: **개별 CLI 플래그 > `--reader` / `reader_profile` > 책 config**.
+
+PDF 여백(`pdf_trim`)은 리더 프로필에 둡니다. crop + 선택적 white-fill:
 
 ```json
-"pdf_trim": { "left": 0.02, "right": 0.02, "top": 0.03, "bottom": 0.03 }
+"pdf_trim": {
+  "left": 0.0, "right": 0.0,
+  "top": 0.01, "bottom": 0.045,
+  "fill_top": 0.026, "fill_bottom": 0.0
+}
 ```
 
 ---

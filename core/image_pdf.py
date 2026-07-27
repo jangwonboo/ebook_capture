@@ -29,7 +29,14 @@ def _safe_dpi(value: object) -> float:
 
 
 def crop_image_by_trim_ratios(img: Image.Image, trim: PdfTrim) -> Image.Image:
-    """Crop ``img`` using ratios of its current width/height."""
+    """Apply ``PdfTrim``: optional white-fill bands, then crop margins.
+
+    ``fill_top`` / ``fill_bottom`` are ratios of the *original* height and paint
+    white starting just inside the top/bottom crop edges (so toolbars can be
+    blanked without removing vertical space).
+    """
+    from PIL import ImageDraw
+
     trim.validate()
     if not trim.is_active():
         return img
@@ -43,7 +50,25 @@ def crop_image_by_trim_ratios(img: Image.Image, trim: PdfTrim) -> Image.Image:
             f"pdf_trim leaves too little content: "
             f"crop=({left},{top},{right},{bottom}) size={width_px}x{height_px}"
         )
-    return img.crop((left, top, right, bottom))
+
+    work = img
+    fill_top_px = int(round(height_px * trim.fill_top))
+    fill_bottom_px = int(round(height_px * trim.fill_bottom))
+    if fill_top_px > 0 or fill_bottom_px > 0:
+        work = img.copy()
+        if work.mode not in ("RGB", "RGBA"):
+            work = work.convert("RGB")
+        drawer = ImageDraw.Draw(work)
+        if fill_top_px > 0:
+            y1 = min(bottom, top + fill_top_px)
+            if y1 > top:
+                drawer.rectangle([left, top, right - 1, y1 - 1], fill=(255, 255, 255))
+        if fill_bottom_px > 0:
+            y0 = max(top, bottom - fill_bottom_px)
+            if bottom > y0:
+                drawer.rectangle([left, y0, right - 1, bottom - 1], fill=(255, 255, 255))
+
+    return work.crop((left, top, right, bottom))
 
 
 def _pdf_page_geometry_from_image(img: Image.Image) -> tuple[float, float]:

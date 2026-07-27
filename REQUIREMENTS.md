@@ -148,18 +148,25 @@ tests/
 
 공유 스키마. GUI와 CLI가 동일 JSON을 쓴다.
 
-주요 필드 그룹:
+파일 분리:
 
-| 그룹 | 필드 |
-|------|------|
-| 책/출력 | `title`, `base_dir`, `n_pages`, `start_page`, `output_mode`, `assemble_style` |
-| 캡처 | `capture_mode`, `target_window_title`, `rect`, `window_capture_backend`, `use_window_client_rect`, `hide_cursor_during_capture`, `delay_sec` |
-| 키 | `next_key`, `key_delivery` |
-| 캡처 전 포커스 | `reader_focus_clicks`, `reader_focus_x_ratio`, `reader_focus_y_ratio`, `focus_click_settle_sec` |
-| 시작 | `fit_on_start`, `start_focus_clicks`, `start_focus_x_ratio`, `start_focus_y_ratio` |
-| PDF | `pdf_trim` (`left/right/top/bottom` 비율 0–0.45) |
-| 잡 | `resume`, `force_phase`, `skip_capture`, `input_pdf`, `reader_profile` |
-| OCR | `ocr_lang`, `ocr_text_prompt`, `ocr_prompt_file` |
+| 파일 | 담는 것 |
+|------|---------|
+| `default_config.jsonc` (책) | `title`, `base_dir`, `n_pages`, `start_page`, `output_mode`, `reader_profile`(이름), `resume`, `force_phase`, OCR/assemble |
+| `reader_profiles.jsonc` (리더) | `capture_mode`, `target_window_title`, `next_key`, `key_delivery`, `delay_sec`, focus/fit, `pdf_trim`, backend… |
+
+런타임 `CaptureConfig`는 둘을 merge한 결과. 주요 필드 그룹:
+
+| 그룹 | 필드 | 주로 있는 파일 |
+|------|------|----------------|
+| 책/출력 | `title`, `base_dir`, `n_pages`, `start_page`, `output_mode`, `assemble_style` | 책 |
+| 잡 | `resume`, `force_phase`, `skip_capture`, `input_pdf`, `reader_profile` | 책 |
+| OCR | `ocr_lang`, `ocr_text_prompt`, `ocr_prompt_file` | 책 |
+| 캡처 | `capture_mode`, `target_window_title`, `rect`, `window_capture_backend`, `use_window_client_rect`, `hide_cursor_during_capture`, `delay_sec` | 리더 |
+| 키 | `next_key`, `key_delivery` | 리더 |
+| 캡처 전 포커스 | `reader_focus_clicks`, `reader_focus_x_ratio`, `reader_focus_y_ratio`, `focus_click_settle_sec` | 리더 |
+| 시작 | `fit_on_start`, `start_focus_clicks`, `start_focus_x_ratio`, `start_focus_y_ratio` | 리더 |
+| PDF | `pdf_trim` (`left/right/top/bottom` 비율 0–0.45) | 리더 |
 
 경로 규칙:
 

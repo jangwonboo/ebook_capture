@@ -160,6 +160,13 @@ def _proven_capture_defaults(pdf_trim: PdfTrim | None = None) -> dict[str, Any]:
 # Ratio measured on a 1592 px tall left-third capture.
 _KINDLE_APP_TOP_BAR_RATIO = 0.032
 
+# Aladin desktop: thin app title strip is cropped; the icon toolbar below it is
+# white-filled (keeps top margin). Bottom page-nav is cropped. Measured on a
+# 1761 px capture: title ~18 px, toolbar+pad ~45 px, bottom nav ~80 px.
+_ALADIN_APP_TOP_TITLE_RATIO = 0.010
+_ALADIN_APP_TOP_TOOLBAR_FILL_RATIO = 0.026
+_ALADIN_APP_BOTTOM_NAV_RATIO = 0.045
+
 
 # Built-in profiles. ``target_window_title`` is only set where the title is
 # stable across machines (Kindle desktop app). Browser tabs vary, so those are
@@ -196,12 +203,19 @@ _BUILTIN_PROFILES: tuple[ReaderProfile, ...] = (
         name="aladin_app",
         label="Aladin ebook reader (desktop app)",
         note=(
-            "Same loop as kindle_app; PageDown/SendInput. "
-            "Set target_window_title. pdf_trim TBD after first clean capture."
+            "Window title is the book name — set target_window_title in the "
+            "book config or --window-title. PageDown/SendInput. "
+            "PDF: crop thin top title strip, white-fill toolbar, crop bottom nav."
         ),
         next_key="pagedown",
         key_delivery=KEY_DELIVERY_SENDINPUT,
-        **_proven_capture_defaults(),
+        **_proven_capture_defaults(
+            PdfTrim(
+                top=_ALADIN_APP_TOP_TITLE_RATIO,
+                fill_top=_ALADIN_APP_TOP_TOOLBAR_FILL_RATIO,
+                bottom=_ALADIN_APP_BOTTOM_NAV_RATIO,
+            )
+        ),
     ),
     ReaderProfile(
         name="aladin_web",

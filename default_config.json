@@ -1,57 +1,34 @@
-{
-  // 책 폴더명 (출력: {base_dir}/{title}/)
-  "title": "세컨드 브레인은 옵시디언",
-  // 캡처할 페이지 수
-  "n_pages": 360,
-  // 첫 페이지 번호 (파일명 _0001 등에 사용)
-  "start_page": 1,
-  // 출력 상위 폴더 (절대 경로)
-  "base_dir": "E:\\ebook",
-
-  // 출력: images | pdf | text
-  "output_mode": "pdf",
-
-  // 캡처 영역:
-  //   manual — rect 좌표 직접 지정
-  //   window_full | window_left_third | window_right_third — 대상 창 기준
-  //   screen_left_third — 창을 화면 왼쪽 1/3·전체 높이로 맞춘 뒤 client 영역 캡처
-  "capture_mode": "screen_left_third",
-  // 대상 창 제목 (부분 일치, 대소문자 무시). GUI Refresh windows 참고
-  "target_window_title": "세컨드",
-  // true: 창 안쪽(client)만 캡처 / false: 타이틀바 포함 frame
-  "use_window_client_rect": true,
-  // 여러 창이 맞을 때 포그라운드 창 우선
-  "prefer_foreground_window_match": true,
-  // printwindow — HWND 비트맵 / screen — 화면 영역(mss). screen_left_third 는 screen 권장
-  "window_capture_backend": "screen",
-  // 캡처 순간 커서를 영역 밖으로 잠깐 이동
-  "hide_cursor_during_capture": true,
-
-  // manual 모드일 때만 사용 (left, top, width, height)
-  "rect": { "left": 0, "top": 0, "width": 0, "height": 0 },
-
-  // 페이지 넘긴 뒤 대기(초)
-  "delay_sec": 2.0,
-  // 다음 페이지 키: pagedown | pageup | right | left | down | up | space | enter
-  "next_key": "pagedown",
-  // 키 전달 방식:
-  //   auto — 앱에 맞게 자동 (Chrome→PostMessage, 네이티브→SendInput 등)
-  //   sendinput | postmessage | postmessage_top | pyautogui
-  "key_delivery": "auto",
-  // 키 보내기 전 캡처 영역 좌상단 20%,20% 지점 싱글 클릭 횟수 (0=클릭 없음)
-  "reader_focus_clicks": 2,
-
-  // true: 중단 후 같은 명령으로 이어서 캡처
-  "resume": true,
-  // 강제 재실행: "" | capture | ocr | pdf | all
-  "force_phase": "",
-
-  // OCR 언어 힌트 (text 모드)
-  "ocr_lang": "kor",
-  // Gemini OCR 프롬프트 (비우면 assets/ocr_default_prompt.txt)
-  "ocr_text_prompt": "",
-  "ocr_prompt_file": "",
-
-  // Markdown 조립: full | prose | raw
-  "assemble_style": "full"
-}
+{
+  // 책 정보 config (리더 knobs는 reader_profiles.jsonc / --reader 로).
+  // 우선순위: CLI 플래그 > reader 프로필 > 이 파일.
+
+  // 책 폴더명 (출력: {base_dir}/{title}/)
+  "title": "세컨드 브레인은 옵시디언",
+  // 캡처할 페이지 수
+  "n_pages": 360,
+  // 첫 페이지 번호 (파일명 _0001 등에 사용)
+  "start_page": 1,
+  // 출력 상위 폴더 (절대 경로)
+  "base_dir": "E:\\ebook",
+
+  // 출력: images | pdf | text
+  "output_mode": "pdf",
+
+  // 리더 프로필 이름만 지정 (동작은 reader_profiles.jsonc).
+  // kindle_app | kindle_cloud | aladin_app | aladin_web | "" (미사용)
+  "reader_profile": "aladin_app",
+
+  // true: 중단 후 같은 명령으로 이어서 캡처
+  "resume": true,
+  // 강제 재실행: "" | capture | ocr | pdf | all
+  "force_phase": "",
+
+  // OCR 언어 힌트 (text 모드)
+  "ocr_lang": "kor",
+  // Gemini OCR 프롬프트 (비우면 assets/ocr_default_prompt.txt)
+  "ocr_text_prompt": "",
+  "ocr_prompt_file": "",
+
+  // Markdown 조립: full | prose | raw
+  "assemble_style": "full"
+}

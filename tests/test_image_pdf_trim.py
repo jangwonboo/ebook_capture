@@ -18,6 +18,27 @@ def test_crop_image_by_trim_ratios() -> None:
     assert trimmed.size == (800, 1800)
 
 
+def test_fill_top_whitens_toolbar_without_shrinking_height() -> None:
+    # Dark title (50px) + colored toolbar (100px) + white content.
+    img = Image.new("RGB", (200, 1000), color=(255, 255, 255))
+    for y in range(0, 50):
+        for x in range(200):
+            img.putpixel((x, y), (40, 40, 40))
+    for y in range(50, 150):
+        for x in range(200):
+            img.putpixel((x, y), (80, 120, 200))
+    # title crop 0.05 (=50px), fill_top 0.10 (=100px) of original height
+    out = crop_image_by_trim_ratios(
+        img, PdfTrim(top=0.05, fill_top=0.10, bottom=0.0)
+    )
+    assert out.size == (200, 950)
+    # First rows of result are former toolbar — now white
+    assert out.getpixel((100, 10)) == (255, 255, 255)
+    assert out.getpixel((100, 90)) == (255, 255, 255)
+    # Content below fill stays white
+    assert out.getpixel((100, 200)) == (255, 255, 255)
+
+
 def test_build_page_image_pdf_with_trim(tmp_path: Path) -> None:
     png = tmp_path / "page.png"
     Image.new("RGB", (400, 800), color=(255, 255, 255)).save(png)

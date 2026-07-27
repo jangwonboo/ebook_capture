@@ -38,21 +38,27 @@ def test_apply_kindle_app_profile() -> None:
         "right": 0.0,
         "top": 0.032,
         "bottom": 0.0,
+        "fill_top": 0.0,
+        "fill_bottom": 0.0,
     }
     assert changed
 
 
 def test_apply_aladin_app_profile() -> None:
-    cfg = CaptureConfig(title="t", base_dir="/x")
+    cfg = CaptureConfig(title="t", base_dir="/x", target_window_title="뇌는 어떻게 나를 조종하는가")
     apply_reader_profile(cfg, "aladin_app")
     assert cfg.next_key == "pagedown"
     assert cfg.key_delivery == "sendinput"
+    # Aladin window title is the book name — profile must not overwrite it.
+    assert cfg.target_window_title == "뇌는 어떻게 나를 조종하는가"
     assert cfg.reader_focus_clicks == 2
     assert cfg.reader_focus_x_ratio == 0.5
     assert cfg.focus_click_settle_sec == 1.0
     assert cfg.start_focus_clicks == 0
     assert cfg.fit_on_start is False
-    assert cfg.pdf_trim.top == 0.0
+    assert cfg.pdf_trim.top == 0.010
+    assert cfg.pdf_trim.fill_top == 0.026
+    assert cfg.pdf_trim.bottom == 0.045
 
 
 def test_apply_kindle_cloud_uses_center_clicks_not_top() -> None:

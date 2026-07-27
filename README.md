@@ -22,8 +22,8 @@
 
 ```text
 cli.py                         # gui | run | test-key | inspect
-default_config.jsonc           # 기본 CaptureConfig
-reader_profiles.jsonc          # Kindle / Aladin 등 리더 동작
+default_config.jsonc           # 책 정보 (title/pages/output; reader_profile 이름)
+reader_profiles.jsonc          # 리더 동작 (키·클릭·delay·pdf_trim)
 assets/                        # OCR 프롬프트, 언어 CSV
 core/                          # 캡처 · OCR · PDF · assemble (Qt 없음)
 gui/                           # PyQt → run -y 서브프로세스

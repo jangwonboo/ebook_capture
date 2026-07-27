@@ -113,7 +113,7 @@ python -m ebook_capture run --config default_config.jsonc --reader aladin_web  -
 
 - [ ] GUI Reader 콤보가 새 필드(`focus_click_settle_sec`, focus ratios)를 프로필 적용 시 반영하는지 확인
 - [ ] 검증용 폴더 정리: `E:\ebook\kindle_verify_*` (이전 세션 스모크)
-- [ ] `default_config.json`이 `jsonc`와 어긋나면 동기화
+- [x] 책 config에서 리더 knobs 제거 (`default_config.jsonc` / `.json` = 책만)
 
 ---
 

@@ -44,8 +44,9 @@
       "start_focus_clicks": 0,
       "start_focus_x_ratio": 0.5,
       "start_focus_y_ratio": 0.5,
-      // Kindle 앱 자체 상단 바(뒤로/설정/창버튼 ~48px)가 client 영역에 포함됨.
-      "pdf_trim": { "left": 0.0, "right": 0.0, "top": 0.032, "bottom": 0.0 }
+      // Kindle 앱 자체 상단 바(뒤로/설정/창버튼 ~63px)가 client 영역에 포함됨 → top crop.
+      // bottom=0: 하단 페이지 번호("Page X of Y")는 살려 둠.
+      "pdf_trim": { "left": 0.0, "right": 0.0, "top": 0.035, "bottom": 0.0 }
     },
     {
       "name": "kindle_cloud",

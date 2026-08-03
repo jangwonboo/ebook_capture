@@ -155,10 +155,11 @@ def _proven_capture_defaults(pdf_trim: PdfTrim | None = None) -> dict[str, Any]:
     }
 
 
-# The Kindle desktop app draws its own ~48 px top bar (back arrow, settings,
-# window buttons) inside the client area, so window capture always includes it.
-# Ratio measured on a 1592 px tall left-third capture.
-_KINDLE_APP_TOP_BAR_RATIO = 0.032
+# The Kindle desktop app draws its own top bar (back arrow, settings, window
+# buttons) inside the client area, so window capture always includes it. The
+# bottom page-number footer ("Page X of Y") is kept (pdf_trim bottom=0).
+# Ratio ~63 px on a 1799 px tall left-third capture (chrome ends at y=59).
+_KINDLE_APP_TOP_BAR_RATIO = 0.035
 
 # Kindle pages are full of activatable content — TOC entries in the center,
 # figure/footnote links that can sit on any text line — so no fixed click

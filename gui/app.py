@@ -11,15 +11,10 @@ from pathlib import Path
 import pandas as pd
 from PyQt5.QtCore import QEventLoop, QProcess, QProcessEnvironment, QRect, Qt
 from PyQt5.QtWidgets import (
-    QCheckBox,
-    QFileDialog,
-    QDialog,
-    QMessageBox,
     QComboBox,
-    QGroupBox,
-    QLabel,
-    QPushButton,
-    QSpinBox,
+    QDialog,
+    QFileDialog,
+    QMessageBox,
 )
 
 from core.config import (
@@ -113,10 +108,6 @@ ASSEMBLE_STYLE_ITEMS = (
     ("Raw OCR (debug)", "raw"),
 )
 
-# Extra rows under Options (key delivery / resume / force / backend)
-_OPTIONS_EXTRA_H = 100
-
-
 def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
@@ -161,30 +152,30 @@ class CaptureDialog(QDialog):
 
         self._df_ocr = pd.read_csv(_assets_dir() / "ocr_lang.csv")
 
+        # Widgets live in Ui_Dialog (layout-based); keep short aliases used below.
+        self.cb_reader = self.ui.cb_reader
+        self.cb_key_delivery = self.ui.cb_key_delivery
+        self.sb_focus_clicks = self.ui.sb_focus_clicks
+        self.cb_output_mode = self.ui.cb_output_mode
+        self.lb_ocr_lang = self.ui.lb_ocr_lang
+        self.cb_assemble_style = self.ui.cb_assemble_style
+        self.chk_resume = self.ui.chk_resume
+        self.cb_force_phase = self.ui.cb_force_phase
+        self.cb_window_backend = self.ui.cb_window_backend
+        self.chk_client_rect = self.ui.chk_client_rect
+        self.chk_hide_cursor = self.ui.chk_hide_cursor
+        self.cb_region_preset = self.ui.cb_region_preset
+        self.btn_refresh_windows = self.ui.btn_refresh_windows
+        self.cb_target_window = self.ui.cb_target_window
+        self.sb_start_page = self.ui.sb_start_page
+        self.sb_page_count = self.ui.sb_page_count
+        self.btn_assemble = self.ui.btn_assemble
+
         self.ui.cb_ocr_lang_pri.clear()
-        self.ui.cb_ocr_lang_sec.clear()
         for lang in self._df_ocr["lang"]:
             self.ui.cb_ocr_lang_pri.addItem(str(lang))
-            self.ui.cb_ocr_lang_sec.addItem(str(lang))
-
-        self.ui.lb_pages.hide()
-        self.ui.sb_pages.hide()
-        self.ui.btn_window.hide()
-        self.ui.cb_win_titles.hide()
-        self.ui.cb_ocr_lang_sec.hide()  # CLI has a single --ocr-lang
-        self.ui.btn_nextpt.hide()
-        self.ui.lb_capture_method.hide()  # replaced by Reader row
-
-        # Expand Options group for CLI-parity controls
-        self.ui.gb_options.setGeometry(10, 10, 461, 356 + _OPTIONS_EXTRA_H)
-        self.ui.btn_save.setGeometry(10, 310 + _OPTIONS_EXTRA_H, 96, 31)
-        self.ui.btn_load.setGeometry(115, 310 + _OPTIONS_EXTRA_H, 96, 31)
 
         # Reader profile row (Kindle / Aladin / …) — applies reader behavior
-        self.lb_reader = QLabel("Reader", self.ui.gb_options)
-        self.lb_reader.setGeometry(15, 112, 56, 21)
-        self.cb_reader = QComboBox(self.ui.gb_options)
-        self.cb_reader.setGeometry(75, 108, 205, 26)
         self.cb_reader.addItem("(custom)", "")
         for _profile in list_reader_profiles():
             self.cb_reader.addItem(_profile.label or _profile.name, _profile.name)
@@ -193,110 +184,49 @@ class CaptureDialog(QDialog):
         )
         self.cb_reader.currentIndexChanged.connect(self._on_reader_changed)
 
-        self.ui.cb_next.clear()
         for label, value in NEXT_KEY_ITEMS:
             self.ui.cb_next.addItem(label, value)
-        self.ui.cb_next.setGeometry(75, 150, 160, 26)
 
-        self.lb_key_delivery = QLabel("Key send", self.ui.gb_options)
-        self.lb_key_delivery.setGeometry(15, 185, 56, 21)
-        self.cb_key_delivery = QComboBox(self.ui.gb_options)
-        self.cb_key_delivery.setGeometry(75, 180, 160, 26)
         for label, value in KEY_DELIVERY_ITEMS:
             self.cb_key_delivery.addItem(label, value)
 
-        self.lb_focus_clicks = QLabel("Focus clicks", self.ui.gb_options)
-        self.lb_focus_clicks.setGeometry(250, 185, 80, 21)
-        self.sb_focus_clicks = QSpinBox(self.ui.gb_options)
-        self.sb_focus_clicks.setGeometry(335, 180, 111, 26)
         self.sb_focus_clicks.setRange(0, 5)
         self.sb_focus_clicks.setValue(2)
         self.sb_focus_clicks.setToolTip(
             "Clicks near capture top-left before next_key (0 = none)"
         )
 
-        self.cb_output_mode = QComboBox(self.ui.gb_options)
-        self.cb_output_mode.setGeometry(75, 215, 371, 26)
         for label, value in OUTPUT_MODE_ITEMS:
             self.cb_output_mode.addItem(label, value)
         self.cb_output_mode.currentIndexChanged.connect(self._on_output_mode_changed)
-        self.ui.lb_output.setGeometry(15, 220, 46, 21)
 
-        self.lb_ocr_lang = QLabel("OCR Lang", self.ui.gb_options)
-        self.lb_ocr_lang.setGeometry(15, 255, 90, 21)
-        self.ui.cb_ocr_lang_pri.setGeometry(75, 250, 160, 26)
-
-        self.lb_assemble_style = QLabel("Markdown", self.ui.gb_options)
-        self.lb_assemble_style.setGeometry(15, 290, 56, 21)
-        self.cb_assemble_style = QComboBox(self.ui.gb_options)
-        self.cb_assemble_style.setGeometry(75, 285, 371, 26)
         for label, value in ASSEMBLE_STYLE_ITEMS:
             self.cb_assemble_style.addItem(label, value)
 
-        self.chk_resume = QCheckBox("Resume (skip done pages)", self.ui.gb_options)
-        self.chk_resume.setGeometry(15, 320, 200, 22)
         self.chk_resume.setChecked(True)
         self.chk_resume.setToolTip("Matches CLI --resume / --no-resume")
 
-        self.lb_force_phase = QLabel("Force", self.ui.gb_options)
-        self.lb_force_phase.setGeometry(230, 322, 40, 21)
-        self.cb_force_phase = QComboBox(self.ui.gb_options)
-        self.cb_force_phase.setGeometry(275, 318, 171, 26)
         for label, value in FORCE_PHASE_ITEMS:
             self.cb_force_phase.addItem(label, value)
         self.cb_force_phase.setToolTip("Matches CLI --force-phase")
 
-        self.lb_win_backend = QLabel("Backend", self.ui.gb_options)
-        self.lb_win_backend.setGeometry(15, 355, 56, 21)
-        self.cb_window_backend = QComboBox(self.ui.gb_options)
-        self.cb_window_backend.setGeometry(75, 350, 160, 26)
         for label, value in WINDOW_BACKEND_ITEMS:
             self.cb_window_backend.addItem(label, value)
 
-        self.chk_client_rect = QCheckBox("Client area only", self.ui.gb_options)
-        self.chk_client_rect.setGeometry(250, 352, 120, 22)
         self.chk_client_rect.setChecked(True)
         self.chk_client_rect.setToolTip(
             "On = client area; off = full frame (CLI --window-frame)"
         )
-
-        self.chk_hide_cursor = QCheckBox("Hide cursor", self.ui.gb_options)
-        self.chk_hide_cursor.setGeometry(375, 352, 80, 22)
         self.chk_hide_cursor.setToolTip("CLI --hide-cursor-during-capture")
 
-        # Capture target group sits below expanded Options
-        target_y = 20 + 356 + _OPTIONS_EXTRA_H
-        self.gb_capture_target = QGroupBox("Target window & capture area", self)
-        self.gb_capture_target.setGeometry(10, target_y, 461, 100)
-
-        self.cb_region_preset = QComboBox(self.gb_capture_target)
-        self.cb_region_preset.setGeometry(10, 20, 441, 26)
         for label, _mode in PRESET_MODE_ITEMS:
             self.cb_region_preset.addItem(label)
 
-        self.btn_refresh_windows = QPushButton("Refresh windows", self.gb_capture_target)
-        self.btn_refresh_windows.setGeometry(10, 52, 118, 28)
-
-        self.cb_target_window = QComboBox(self.gb_capture_target)
         self.cb_target_window.setEditable(False)
-        self.cb_target_window.setGeometry(132, 52, 319, 26)
-
-        lbl_sp = QLabel("Start page #", self.gb_capture_target)
-        lbl_sp.setGeometry(10, 86, 72, 21)
-        self.sb_start_page = QSpinBox(self.gb_capture_target)
-        self.sb_start_page.setGeometry(84, 82, 80, 26)
         self.sb_start_page.setMinimum(1)
         self.sb_start_page.setMaximum(999999)
-
-        lbl_pc = QLabel("Page count", self.gb_capture_target)
-        lbl_pc.setGeometry(185, 86, 72, 21)
-        self.sb_page_count = QSpinBox(self.gb_capture_target)
-        self.sb_page_count.setGeometry(258, 82, 80, 26)
         self.sb_page_count.setMinimum(1)
         self.sb_page_count.setMaximum(10000)
-
-        progress_y = target_y + 110
-        self.ui.gb_progress.setGeometry(10, progress_y, 461, 520)
 
         self.btn_refresh_windows.clicked.connect(self._refresh_window_list)
         self.cb_region_preset.currentIndexChanged.connect(self._on_preset_changed)
@@ -307,11 +237,6 @@ class CaptureDialog(QDialog):
         self.ui.le_title.setPlaceholderText(
             f"Book title — default: {DEFAULT_BOOK_TITLE}"
         )
-
-        self.btn_assemble = QPushButton("Assemble MD", self.ui.gb_progress)
-        self.btn_assemble.setGeometry(170, 115, 118, 31)
-        self.ui.btn_start.setGeometry(295, 115, 71, 31)
-        self.ui.btn_cancle.setGeometry(375, 115, 76, 31)
 
         self._refresh_window_list(quiet=True)
         self._apply_defaults()
@@ -324,10 +249,10 @@ class CaptureDialog(QDialog):
         self.ui.btn_load.clicked.connect(self._load_options)
         self.ui.btn_start.clicked.connect(self._start_capture)
         self.btn_assemble.clicked.connect(self._start_assemble)
-        self.ui.btn_cancle.clicked.connect(self._cancel_job)
+        self.ui.btn_cancel.clicked.connect(self._cancel_job)
 
         self.setWindowTitle("Ebook Capture")
-        self.resize(480, progress_y + 540)
+        self.resize(560, 860)
 
     def _refresh_window_list(self, quiet: bool = False) -> None:
         self.cb_target_window.blockSignals(True)
@@ -410,7 +335,6 @@ class CaptureDialog(QDialog):
         for i in range(len(self._df_ocr)):
             if str(self._df_ocr.iloc[i]["code"]) == "eng":
                 self.ui.cb_ocr_lang_pri.setCurrentIndex(i)
-                self.ui.cb_ocr_lang_sec.setCurrentIndex(i)
                 break
 
         self.ui.le_folder.setText(_default_output_base())
@@ -910,12 +834,11 @@ def run_gui() -> None:
 
     app = QApplication(sys.argv)
 
-    from gui.theme import apply_material_theme
+    from gui.theme import apply_native_theme
 
-    apply_material_theme(app, dark=True)
+    apply_native_theme(app)
 
     dlg = CaptureDialog()
-    dlg.resize(max(520, dlg.width()), dlg.height())
     dlg.show()
 
     sys.exit(app.exec_())

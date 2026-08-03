@@ -25,9 +25,11 @@ def test_apply_kindle_app_profile() -> None:
     assert cfg.reader_profile == "kindle_app"
     assert cfg.next_key == "right"
     assert cfg.key_delivery == "sendinput"
-    assert cfg.reader_focus_clicks == 2
+    # 0 clicks: Kindle pages carry TOC/figure/footnote links at unpredictable
+    # positions, so focus is API-foreground only (no mouse).
+    assert cfg.reader_focus_clicks == 0
     assert cfg.reader_focus_x_ratio == 0.5
-    assert cfg.reader_focus_y_ratio == 0.5
+    assert cfg.reader_focus_y_ratio == 0.08
     assert cfg.focus_click_settle_sec == 1.0
     assert cfg.target_window_title == "Kindle"
     assert cfg.fit_on_start is False
@@ -79,9 +81,10 @@ def test_all_profiles_share_proven_capture_loop() -> None:
         cfg = CaptureConfig(title="t", base_dir="/x")
         apply_reader_profile(cfg, name)
         assert cfg.capture_mode == "screen_left_third"
-        assert cfg.reader_focus_clicks == 2
+        # kindle_app avoids in-page links entirely (API foreground, no clicks).
+        assert cfg.reader_focus_clicks == (0 if name == "kindle_app" else 2)
         assert cfg.reader_focus_x_ratio == 0.5
-        assert cfg.reader_focus_y_ratio == 0.5
+        assert cfg.reader_focus_y_ratio == (0.08 if name == "kindle_app" else 0.5)
         assert cfg.focus_click_settle_sec == 1.0
         assert cfg.fit_on_start is False
         assert cfg.hide_cursor_during_capture is True

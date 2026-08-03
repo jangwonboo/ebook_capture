@@ -25,13 +25,15 @@
     {
       "name": "kindle_app",
       "label": "Kindle ebook reader (desktop app)",
-      "note": "검증 기준선. 중앙×2 → settle → 캡처 → right/SendInput. 상단 앱 바 trim.",
+      "note": "검증 기준선. API 포그라운드(클릭 없음) → 캡처 → right/SendInput. 상단 앱 바 trim.",
       "capture_mode": "screen_left_third",
       "next_key": "right",
       "key_delivery": "sendinput",
-      "reader_focus_clicks": 2,
+      // 클릭 포커스는 본문 링크(목차 항목, Figure/각주 링크)를 눌러 점프시킴.
+      // clicks=0 이면 Win32 API로만 포그라운드 — 마우스 클릭 없음.
+      "reader_focus_clicks": 0,
       "reader_focus_x_ratio": 0.5,
-      "reader_focus_y_ratio": 0.5,
+      "reader_focus_y_ratio": 0.08,
       "focus_click_settle_sec": 1.0,
       "window_capture_backend": "screen",
       "use_window_client_rect": true,

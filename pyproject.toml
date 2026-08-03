@@ -24,6 +24,11 @@ dependencies = [
   "reportlab>=4.0",
 ]
 
+[tool.uv]
+required-environments = [
+  "sys_platform == 'win32' and platform_machine == 'AMD64'",
+]
+
 [project.scripts]
 ebook-capture = "ebook_capture:main"
 

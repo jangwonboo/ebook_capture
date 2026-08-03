@@ -160,6 +160,13 @@ def _proven_capture_defaults(pdf_trim: PdfTrim | None = None) -> dict[str, Any]:
 # Ratio measured on a 1592 px tall left-third capture.
 _KINDLE_APP_TOP_BAR_RATIO = 0.032
 
+# Kindle pages are full of activatable content — TOC entries in the center,
+# figure/footnote links that can sit on any text line — so no fixed click
+# point is safe. Focus via the Win32 API instead (clicks=0 → pipeline
+# foregrounds the pinned window without touching the mouse).
+_KINDLE_APP_FOCUS_CLICKS = 0
+_KINDLE_APP_FOCUS_Y_RATIO = 0.08
+
 # Aladin desktop: thin app title strip is cropped; the icon toolbar below it is
 # white-filled (keeps top margin). Bottom page-nav is cropped. Measured on a
 # 1761 px capture: title ~18 px, toolbar+pad ~45 px, bottom nav ~80 px.
@@ -180,13 +187,17 @@ _BUILTIN_PROFILES: tuple[ReaderProfile, ...] = (
         name="kindle_app",
         label="Kindle ebook reader (desktop app)",
         note=(
-            "Proven baseline. Center×2 → settle → capture → right/SendInput. "
-            "PDF trims app top bar (client-area chrome)."
+            "Proven baseline. API foreground (no clicks) → capture → "
+            "right/SendInput. PDF trims app top bar (client-area chrome)."
         ),
         next_key="right",
         key_delivery=KEY_DELIVERY_SENDINPUT,
         target_window_title="Kindle",
-        **_proven_capture_defaults(PdfTrim(top=_KINDLE_APP_TOP_BAR_RATIO)),
+        **{
+            **_proven_capture_defaults(PdfTrim(top=_KINDLE_APP_TOP_BAR_RATIO)),
+            "reader_focus_clicks": _KINDLE_APP_FOCUS_CLICKS,
+            "reader_focus_y_ratio": _KINDLE_APP_FOCUS_Y_RATIO,
+        },
     ),
     ReaderProfile(
         name="kindle_cloud",

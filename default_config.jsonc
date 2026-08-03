@@ -1,34 +1,34 @@
-{
-  // 책 정보 config (리더 knobs는 reader_profiles.jsonc / --reader 로).
-  // 우선순위: CLI 플래그 > reader 프로필 > 이 파일.
-
-  // 책 폴더명 (출력: {base_dir}/{title}/)
-  "title": "뇌는_어떻게_나를_조종하는가",
-  // 캡처할 페이지 수
-  "n_pages": 150,
-  // 첫 페이지 번호 (파일명 _0001 등에 사용)
-  "start_page": 1,
-  // 출력 상위 폴더 (절대 경로)
-  "base_dir": "E:\\ebook",
-
-  // 출력: images | pdf | text
-  "output_mode": "pdf",
-
-  // 리더 프로필 이름 (동작은 reader_profiles.jsonc)
-  "reader_profile": "aladin_app",
-  // Aladin 앱 창 제목 = 책 이름 (부분 일치). Kindle처럼 고정 제목이 아님.
-  "target_window_title": "뇌는 어떻게 나를 조종하는가",
-
-  // true: 중단 후 같은 명령으로 이어서 캡처
-  "resume": true,
-  // 강제 재실행: "" | capture | ocr | pdf | all
-  "force_phase": "",
-
-  // OCR 언어 힌트 (text 모드)
-  "ocr_lang": "kor",
-  "ocr_text_prompt": "",
-  "ocr_prompt_file": "",
-
-  // Markdown 조립: full | prose | raw
-  "assemble_style": "full"
-}
+{
+  // 책 정보 config (리더 knobs는 reader_profiles.jsonc / --reader 로).
+  // 우선순위: CLI 플래그 > reader 프로필 > 이 파일.
+
+  // 책 폴더명 (출력: {base_dir}/{title}/)
+  "title": "뇌는_어떻게_나를_조종하는가",
+  // 캡처할 페이지 수
+  "n_pages": 150,
+  // 첫 페이지 번호 (파일명 _0001 등에 사용)
+  "start_page": 1,
+  // 출력 상위 폴더 (절대 경로)
+  "base_dir": "D:\\ebook",
+
+  // 출력: images | pdf | text
+  "output_mode": "pdf",
+
+  // 리더 프로필 이름 (동작은 reader_profiles.jsonc)
+  "reader_profile": "aladin_app",
+  // Aladin 앱 창 제목 = 책 이름 (부분 일치). Kindle처럼 고정 제목이 아님.
+  "target_window_title": "뇌는 어떻게 나를 조종하는가",
+
+  // true: 중단 후 같은 명령으로 이어서 캡처
+  "resume": true,
+  // 강제 재실행: "" | capture | ocr | pdf | all
+  "force_phase": "",
+
+  // OCR 언어 힌트 (text 모드)
+  "ocr_lang": "kor",
+  "ocr_text_prompt": "",
+  "ocr_prompt_file": "",
+
+  // Markdown 조립: full | prose | raw
+  "assemble_style": "full"
+}

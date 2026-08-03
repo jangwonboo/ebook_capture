@@ -12,21 +12,31 @@ _win32_env_ready = False
 def ensure_windows_capture_environment() -> None:
     """Align GDI screen capture with Win32 window rects (pygetwindow) / virtual desktop."""
     global _win32_env_ready
-    if _win32_env_ready or sys.platform != "win32":
+    if sys.platform != "win32":
         return
-    _win32_env_ready = True
-    try:
-        import ctypes
+    import ctypes
 
-        # Prefer per-monitor v2 so GetWindowRect matches multi-monitor + scaling.
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
-    except Exception:
+    if not _win32_env_ready:
+        _win32_env_ready = True
         try:
-            import ctypes
-
-            ctypes.windll.user32.SetProcessDPIAware()
+            # Prefer per-monitor v2 so GetWindowRect matches multi-monitor + scaling.
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
         except Exception:
-            pass
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+    # Process-level awareness may already be locked to system-aware (e.g. an earlier
+    # SetProcessDPIAware from pyautogui/mss). Then window rects on a monitor whose
+    # scale differs from the primary come back DPI-virtualized while mss/GDI grabs
+    # physical pixels — the capture shifts and picks up black off-window margins.
+    # A thread-level per-monitor-v2 context overrides the process default (Win10+),
+    # so re-apply it every call: it must hold on the thread doing rect queries.
+    try:
+        # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 == -4
+        ctypes.windll.user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
+    except Exception:
+        pass
 
 
 def screenshot_region(left: int, top: int, width: int, height: int) -> Image.Image:

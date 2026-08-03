@@ -74,15 +74,39 @@ def _activate_target(cfg: CaptureConfig) -> None:
 def _focus_reader_before_capture(
     cfg: CaptureConfig, progress: ProgressFn | None
 ) -> None:
-    """Click the page, then wait for the reader's hover overlay to fade.
+    """Give the reader focus before capturing, with or without mouse clicks.
 
-    Clicking gives the reader keyboard focus so the page-turn key lands, but it
-    also reveals the page arrows / toolbar. Those only disappear once the pointer
-    leaves the window, so park the pointer first and settle before capturing.
+    With ``reader_focus_clicks > 0``: click the page, park the pointer, and wait
+    for the hover overlay (page arrows / toolbar) to fade before the screenshot.
+    With ``reader_focus_clicks == 0``: foreground the window via the Win32 API
+    only — no clicks, so page content (TOC entries, figure/footnote links) can
+    never be activated by the focus step.
     """
-    if cfg.capture_mode == CAPTURE_MANUAL or cfg.reader_focus_clicks <= 0:
+    if cfg.capture_mode == CAPTURE_MANUAL:
         return
     from core import windows_util as wu
+
+    if cfg.reader_focus_clicks <= 0:
+        if cfg.pinned_target_hwnd > 0:
+            ok = wu.focus_window_for_keyboard(cfg.pinned_target_hwnd)
+        else:
+            ok = wu.activate_window_title(
+                cfg.target_window_title,
+                prefer_foreground=cfg.prefer_foreground_window_match,
+                pinned_hwnd=0,
+            )
+        # A pointer resting over the reader keeps its hover overlay (toolbar,
+        # page arrows, progress bar) on screen — park it outside and, if it was
+        # hovering the capture rect, let the overlay fade before the shot.
+        left, top, w, h = _screen_region(cfg)
+        if w > 0 and h > 0:
+            px, py = pyautogui.position()
+            was_inside = left <= px < left + w and top <= py < top + h
+            _move_pointer_outside_capture_rect(left, top, w, h, None)
+            if was_inside:
+                time.sleep(cfg.focus_click_settle_sec)
+        _emit(progress, f"READER_FOCUS clicks=0 foreground_api ok={ok}")
+        return
 
     left, top, w, h = _screen_region(cfg)
     if w <= 0 or h <= 0:
@@ -554,16 +578,32 @@ def _pin_capture_target(cfg: CaptureConfig, progress: ProgressFn | None) -> None
         _emit(progress, "START_FOCUS clicks=0 (skipped)")
 
 
+def _unmark_page(
+    cfg: CaptureConfig,
+    state: dict[str, Any],
+    phase: str,
+    page_num: int,
+) -> None:
+    state.get("phases", {}).get(phase, {}).pop(str(page_num), None)
+    _save_state(cfg, state)
+
+
 def _run_phase_capture(
     cfg: CaptureConfig,
     state: dict[str, Any],
     n_run: int,
     progress: ProgressFn | None,
-) -> None:
+) -> int:
+    """Capture up to ``n_run`` pages; return the effective page count (may be
+    smaller when the book ends early and identical screenshots repeat)."""
+    import hashlib
+
     _emit(progress, "Phase I: capture PNG")
     _pin_capture_target(cfg, progress)
     skipped_any = False
     settled = False
+    prev_digest: str | None = None
+    repeats = 0
     for i, page_num in enumerate(cfg.page_numbers(n_run)):
         img_path = cfg.page_png_path(page_num)
         if _can_skip_page(
@@ -574,6 +614,8 @@ def _run_phase_capture(
             lambda path=img_path: _valid_png(path),
         ):
             skipped_any = True
+            prev_digest = None
+            repeats = 0
             _emit(progress, f"IMAGE_SKIP page#{page_num} {img_path}")
             continue
         if skipped_any:
@@ -591,6 +633,34 @@ def _run_phase_capture(
         _focus_reader_before_capture(cfg, progress)
         try:
             shot = _capture_one_page(cfg, page_num, i, n_run, progress)
+            digest = hashlib.sha1(shot.tobytes()).hexdigest()
+            if cfg.stop_repeat_pages > 0 and digest == prev_digest:
+                repeats += 1
+                if repeats >= cfg.stop_repeat_pages:
+                    # Page turn stopped advancing: the book ended before n_pages.
+                    # Drop the already-saved duplicates, keep the first occurrence.
+                    dup_start = page_num - repeats + 1
+                    for dup in range(dup_start, page_num):
+                        dup_path = cfg.page_png_path(dup)
+                        try:
+                            dup_path.unlink()
+                        except OSError:
+                            pass
+                        _unmark_page(cfg, state, PHASE_CAPTURE, dup)
+                    last_page = dup_start - 1
+                    state["end_of_book_last_page"] = last_page
+                    _save_state(cfg, state)
+                    _emit(
+                        progress,
+                        f"CAPTURE_END_OF_BOOK page#{last_page} repeated "
+                        f"{repeats + 1}x; stopping early "
+                        f"({last_page - cfg.start_page + 1} pages captured, "
+                        f"n_pages={cfg.n_pages})",
+                    )
+                    return last_page - cfg.start_page + 1
+            else:
+                repeats = 0
+            prev_digest = digest
             _save_image_atomic(shot, img_path)
             if cfg.debug_capture:
                 _emit(
@@ -605,6 +675,7 @@ def _run_phase_capture(
         if i < n_run - 1:
             _send_page_turn_key(cfg, progress)
             time.sleep(cfg.delay_sec)
+    return n_run
 
 
 def _collect_combined_ocr_parts(cfg: CaptureConfig) -> list[str]:
@@ -794,9 +865,20 @@ def run_capture(
     cfg.output_dir().mkdir(parents=True, exist_ok=True)
     cfg.tmp_dir().mkdir(parents=True, exist_ok=True)
     state = _load_state(cfg)
+    # A previous run may have detected the end of the book before n_pages.
+    eob = state.get("end_of_book_last_page")
+    if isinstance(eob, int) and eob >= cfg.start_page:
+        clamped = eob - cfg.start_page + 1
+        if clamped < n_run:
+            n_run = clamped
+            _emit(
+                progress,
+                f"CAPTURE_END_OF_BOOK_KNOWN last page#{eob}; "
+                f"limiting run to {n_run} pages",
+            )
 
     if cfg.run_capture_phase:
-        _run_phase_capture(cfg, state, n_run, progress)
+        n_run = _run_phase_capture(cfg, state, n_run, progress)
     else:
         _emit(
             progress,

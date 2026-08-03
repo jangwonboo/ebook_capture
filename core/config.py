@@ -252,6 +252,9 @@ class CaptureConfig:
     debug_capture: bool = False
     debug_capture_max_pages: int = 5
     delay_sec: float = 1.0
+    # Stop capture after this many consecutive identical screenshots (book ended
+    # but n_pages not yet exhausted). 0 disables the check.
+    stop_repeat_pages: int = 2
     next_key: str = "pagedown"
     # Clicks on the page before each capture: they focus the reader and let its
     # hover overlay (page arrows, toolbar) appear and fade before the screenshot.
@@ -476,6 +479,7 @@ class CaptureConfig:
             debug_capture=bool(data.get("debug_capture", False)),
             debug_capture_max_pages=int(data.get("debug_capture_max_pages", 5)),
             delay_sec=float(data.get("delay_sec", 1.0)),
+            stop_repeat_pages=int(data.get("stop_repeat_pages", 2)),
             next_key=str(data.get("next_key", "pagedown")),
             reader_focus_clicks=int(data.get("reader_focus_clicks", 2)),
             reader_focus_x_ratio=float(data.get("reader_focus_x_ratio", 0.5)),

@@ -38,7 +38,8 @@
       "window_capture_backend": "screen",
       "use_window_client_rect": true,
       "hide_cursor_during_capture": true,
-      "delay_sec": 2.0,
+      // 1.6s 검증: 300쪽 이상 캡처에서 수식/이미지 렌더 누락 없음.
+      "delay_sec": 1.6,
       "target_window_title": "Kindle",
       "fit_on_start": false,
       "start_focus_clicks": 0,

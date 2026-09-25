@@ -14,6 +14,11 @@
   // 출력: images | pdf | text
   "output_mode": "pdf",
 
+  // PDF 페이지를 이 기기 화면비(3:4)에 맞춰 흰색 마진으로 패딩.
+  // "kindle_scribe" | "kindle_colorsoft" | "" (끔). 둘 다 3:4라 호환.
+  // (상/하단 바 제거는 reader 프로필의 pdf_trim 으로.)
+  "pdf_device": "kindle_scribe",
+
   // 리더 프로필 이름 (동작은 reader_profiles.jsonc)
   "reader_profile": "aladin_app",
   // Aladin 앱 창 제목 = 책 이름 (부분 일치). Kindle처럼 고정 제목이 아님.

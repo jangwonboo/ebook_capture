@@ -234,6 +234,22 @@ def pdf_trim_from_mapping(data: Mapping[str, Any]) -> PdfTrim:
     )
 
 
+# E-ink device screen aspect ratios (width / height). When ``pdf_device`` names
+# one, each PDF page is padded with white margins (after ``pdf_trim``) to this
+# ratio so it fills the device screen without the device adding its own
+# letterbox. Scribe and Colorsoft are both ~3:4 portrait.
+PDF_DEVICE_PRESETS: dict[str, tuple[int, int]] = {
+    "kindle_scribe": (1860, 2480),     # 0.7500
+    "kindle_colorsoft": (1264, 1680),  # 0.7524
+}
+
+
+def pdf_device_aspect(name: str) -> float:
+    """Target width/height for a ``pdf_device`` preset, or 0.0 if none/unknown."""
+    wh = PDF_DEVICE_PRESETS.get(str(name).strip().lower())
+    return wh[0] / wh[1] if wh else 0.0
+
+
 @dataclass
 class CaptureConfig:
     """Shared CLI/GUI settings. Phases derive from ``output_mode``."""
@@ -271,6 +287,9 @@ class CaptureConfig:
     start_focus_y_ratio: float = 0.5
     # PDF crop margins as ratios of captured image size.
     pdf_trim: PdfTrim = field(default_factory=PdfTrim)
+    # Pad each PDF page with white margins to this device's screen aspect ratio
+    # ("kindle_scribe" | "kindle_colorsoft" | "" = off). See PDF_DEVICE_PRESETS.
+    pdf_device: str = ""
     output_mode: str = OUTPUT_PDF
     skip_capture: bool = False
     resume: bool = True
@@ -290,6 +309,7 @@ class CaptureConfig:
         self.capture_mode = self.capture_mode.strip()
         self.assemble_style = self.assemble_style.strip().lower()
         self.key_delivery = normalize_key_delivery(self.key_delivery)
+        self.pdf_device = self.pdf_device.strip().lower()
         self.start_focus_x_ratio = float(self.start_focus_x_ratio)
         self.start_focus_y_ratio = float(self.start_focus_y_ratio)
         return self
@@ -447,6 +467,11 @@ class CaptureConfig:
         if self.focus_click_settle_sec < 0.0 or self.focus_click_settle_sec > 10.0:
             raise ValueError("focus_click_settle_sec must be between 0.0 and 10.0")
         self.pdf_trim.validate()
+        if self.pdf_device and pdf_device_aspect(self.pdf_device) <= 0.0:
+            raise ValueError(
+                "pdf_device must be empty or one of: "
+                + ", ".join(sorted(PDF_DEVICE_PRESETS))
+            )
         normalize_key_delivery(self.key_delivery)
 
     @classmethod
@@ -491,6 +516,7 @@ class CaptureConfig:
             start_focus_x_ratio=float(data.get("start_focus_x_ratio", 0.5)),
             start_focus_y_ratio=float(data.get("start_focus_y_ratio", 0.5)),
             pdf_trim=pdf_trim_from_mapping(data),
+            pdf_device=str(data.get("pdf_device", "")),
             output_mode=_output_mode_from_mapping(data),
             skip_capture=bool(data.get("skip_capture", False)),
             resume=bool(data.get("resume", True)),

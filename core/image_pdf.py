@@ -71,6 +71,30 @@ def crop_image_by_trim_ratios(img: Image.Image, trim: PdfTrim) -> Image.Image:
     return work.crop((left, top, right, bottom))
 
 
+def pad_image_to_aspect(img: Image.Image, aspect: float) -> Image.Image:
+    """Center ``img`` on a white canvas whose width/height equals ``aspect``.
+
+    White margins are added on whichever pair of sides is needed (never crops or
+    scales), so the page fills a device screen of that aspect ratio. ``aspect``
+    <= 0 returns the image unchanged.
+    """
+    if aspect <= 0.0:
+        return img
+    work = img if img.mode in ("RGB", "RGBA") else img.convert("RGB")
+    w, h = work.size
+    if w <= 0 or h <= 0:
+        return work
+    if w / h < aspect:                       # too narrow -> pad left/right
+        canvas_w, canvas_h = round(h * aspect), h
+    else:                                    # too wide -> pad top/bottom
+        canvas_w, canvas_h = w, round(w / aspect)
+    if canvas_w <= w and canvas_h <= h:
+        return work
+    out = Image.new("RGB", (canvas_w, canvas_h), (255, 255, 255))
+    out.paste(work, ((canvas_w - w) // 2, (canvas_h - h) // 2))
+    return out
+
+
 def _pdf_page_geometry_from_image(img: Image.Image) -> tuple[float, float]:
     width_px, height_px = img.size
     dpi_meta = img.info.get("dpi", (72.0, 72.0))
@@ -94,11 +118,14 @@ def build_page_image_pdf(
     output_pdf_path: Path | str,
     *,
     trim: PdfTrim | None = None,
+    page_aspect: float = 0.0,
 ) -> Path:
     """Create one plain PDF page with the captured image as the full page.
 
     ``trim`` crops margins as fractions of the capture width/height before
-    embedding (so trim scales with resolution).
+    embedding (so trim scales with resolution). ``page_aspect`` (width/height),
+    when > 0, then pads the trimmed image with white margins to that ratio so it
+    fills a device screen of that aspect (see ``pad_image_to_aspect``).
     """
     canvas_mod, ImageReader = _load_reportlab()
     image = Path(image_path)
@@ -107,7 +134,7 @@ def build_page_image_pdf(
 
     trim = trim or PdfTrim()
     with Image.open(image) as src:
-        cropped = crop_image_by_trim_ratios(src, trim)
+        cropped = pad_image_to_aspect(crop_image_by_trim_ratios(src, trim), page_aspect)
         # Copy so we can close the source file handle before writing PDF.
         work = cropped.copy()
         if "dpi" in src.info:

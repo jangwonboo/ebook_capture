@@ -34,11 +34,12 @@ def test_apply_kindle_app_profile() -> None:
     assert cfg.target_window_title == "Kindle"
     assert cfg.fit_on_start is False
     assert cfg.start_focus_clicks == 0
-    # The Kindle app top bar sits inside the captured client area.
+    # The Kindle app top bar sits inside the captured client area (~63px ->
+    # 0.035); bottom stays 0.0 so the page-number footer is kept.
     assert cfg.pdf_trim.as_dict() == {
         "left": 0.0,
         "right": 0.0,
-        "top": 0.032,
+        "top": 0.035,
         "bottom": 0.0,
         "fill_top": 0.0,
         "fill_bottom": 0.0,

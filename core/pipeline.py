@@ -799,9 +799,14 @@ def _run_phase_pdf(
 ) -> int:
     from core.image_pdf import build_page_image_pdf, merge_pdfs
 
+    from core.config import pdf_device_aspect
+
     _emit(progress, "Phase III: image PDF")
     if cfg.pdf_trim.is_active():
         _emit(progress, f"PDF_TRIM {cfg.pdf_trim.as_dict()}")
+    page_aspect = pdf_device_aspect(cfg.pdf_device)
+    if page_aspect > 0.0:
+        _emit(progress, f"PDF_DEVICE {cfg.pdf_device} aspect={page_aspect:.4f}")
     page_pdfs: list[Path] = []
     try:
         for page_num in cfg.page_numbers(n_run):
@@ -822,7 +827,7 @@ def _run_phase_pdf(
                 continue
             try:
                 part = _part_path(page_pdf)
-                build_page_image_pdf(png, part, trim=cfg.pdf_trim)
+                build_page_image_pdf(png, part, trim=cfg.pdf_trim, page_aspect=page_aspect)
                 os.replace(part, page_pdf)
                 if not _valid_pdf(page_pdf):
                     raise RuntimeError(f"Generated invalid PDF page: {page_pdf}")

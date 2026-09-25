@@ -129,3 +129,43 @@ def test_input_pdf_validation(tmp_path: Path) -> None:
     cfg.start_page = 99
     with pytest.raises(ValueError, match="exceeds PDF page count"):
         cfg.validate()
+
+
+def test_pdf_device_preset_and_padding():
+    """pdf_device resolves to a device aspect and pads pages with white margins."""
+    from core.config import pdf_device_aspect, PDF_DEVICE_PRESETS
+    from core.image_pdf import pad_image_to_aspect
+    from PIL import Image
+
+    assert pdf_device_aspect("kindle_scribe") == 1860 / 2480
+    assert pdf_device_aspect("KINDLE_COLORSOFT ") == 1264 / 1680
+    assert pdf_device_aspect("") == 0.0
+    assert pdf_device_aspect("nope") == 0.0
+    assert set(PDF_DEVICE_PRESETS) == {"kindle_scribe", "kindle_colorsoft"}
+
+    # too-narrow page gets left/right white margins to reach 0.75, no scaling
+    narrow = pad_image_to_aspect(Image.new("RGB", (1170, 1741), (0, 0, 0)), 0.75)
+    assert abs(narrow.width / narrow.height - 0.75) < 0.002  # integer-rounded
+    assert narrow.height == 1741 and narrow.width > 1170
+    # aspect 0 leaves the image untouched
+    same = Image.new("RGB", (100, 200))
+    assert pad_image_to_aspect(same, 0.0) is same
+
+
+def test_pdf_device_validation():
+    base = dict(
+        capture_mode="manual",
+        rect={"left": 0, "top": 0, "width": 10, "height": 10},
+        base_dir="D:/x",
+        output_mode="images",
+    )
+    from core.config import CaptureConfig
+
+    CaptureConfig.from_mapping({**base, "pdf_device": "kindle_scribe"}).validate()
+    CaptureConfig.from_mapping({**base, "pdf_device": ""}).validate()
+    try:
+        CaptureConfig.from_mapping({**base, "pdf_device": "bogus"}).validate()
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("bogus pdf_device should fail validation")

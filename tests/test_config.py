@@ -169,3 +169,35 @@ def test_pdf_device_validation():
         pass
     else:
         raise AssertionError("bogus pdf_device should fail validation")
+
+
+def test_capture_scale_config_and_clamp():
+    from core.config import CaptureConfig
+    from core.windows_util import clamp_size_keep_aspect
+
+    base = dict(
+        capture_mode="manual",
+        rect={"left": 0, "top": 0, "width": 10, "height": 10},
+        base_dir="D:/x",
+        output_mode="images",
+    )
+    c = CaptureConfig.from_mapping({**base, "capture_scale": 2.5, "capture_monitor": 1})
+    c.validate()
+    assert c.capture_scale == 2.5 and c.capture_monitor == 1
+    # defaults
+    d = CaptureConfig.from_mapping(base)
+    assert d.capture_scale == 1.0 and d.capture_monitor == -1
+    # range
+    for bad in (0.5, 9.0):
+        try:
+            CaptureConfig.from_mapping({**base, "capture_scale": bad}).validate()
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"capture_scale {bad} should fail")
+
+    # clamp: too tall -> height-bound, aspect kept
+    w, h, f = clamp_size_keep_aspect(2880, 5400, 2880, 1800)
+    assert h == 1800 and abs(f - 1800 / 5400) < 1e-6 and w == round(2880 * f)
+    # fits -> no clamp
+    assert clamp_size_keep_aspect(1200, 1600, 2880, 1800) == (1200, 1600, 1.0)

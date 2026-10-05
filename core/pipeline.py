@@ -498,6 +498,46 @@ def _capture_one_page(
     return shot
 
 
+def _apply_capture_scale(cfg: CaptureConfig, progress: ProgressFn | None) -> None:
+    """Enlarge the reader window by ``cfg.capture_scale`` on ``cfg.capture_monitor``.
+
+    Aspect ratio kept; clamped to the monitor work area. No-op without a window or
+    scale <= 1.0. Environment-agnostic: the window is resized on whatever display
+    backs the desktop (physical, RDP virtual, or a console virtual-display monitor).
+    """
+    from core import windows_util as wu
+
+    scale = float(getattr(cfg, "capture_scale", 1.0) or 1.0)
+    hwnd = int(getattr(cfg, "pinned_target_hwnd", 0) or 0)
+    if scale <= 1.0 or hwnd <= 0:
+        return
+    mon = wu.monitor_rect(int(getattr(cfg, "capture_monitor", -1)), use_work_area=True)
+    if mon is None:
+        _emit(progress, f"CAPTURE_SCALE_SKIP monitor #{cfg.capture_monitor} not found")
+        return
+    ml, mt, mw, mh = mon
+    try:
+        _wl, _wt, ww, wh = wu.frame_screen_rect_for_hwnd(hwnd)
+    except Exception as exc:  # noqa: BLE001 - defensive: skip scale on rect failure
+        _emit(progress, f"CAPTURE_SCALE_SKIP window rect error {exc!r}")
+        return
+    tw, th = int(round(ww * scale)), int(round(wh * scale))
+    cw, ch, factor = wu.clamp_size_keep_aspect(tw, th, mw, mh)
+    applied = scale * factor
+    wu.fit_window_to_rect(hwnd, ml, mt, cw, ch)
+    _emit(
+        progress,
+        f"CAPTURE_SCALE requested={scale:.2f} applied={applied:.2f} "
+        f"monitor=#{cfg.capture_monitor} size={cw}x{ch} from={ww}x{wh}",
+    )
+    if factor < 0.999:
+        _emit(
+            progress,
+            f"CAPTURE_SCALE_CLAMP requested {scale:.2f}x exceeds monitor "
+            f"work area {mw}x{mh}; applied {applied:.2f}x",
+        )
+
+
 def _pin_capture_target(cfg: CaptureConfig, progress: ProgressFn | None) -> None:
     """Lock HWND and capture rect for the whole capture phase."""
     from core import windows_util as wu
@@ -536,12 +576,13 @@ def _pin_capture_target(cfg: CaptureConfig, progress: ProgressFn | None) -> None
                 "READER_FIT_WARN window did not fully reach left third; "
                 "capture uses client area — check for maximized/other monitors",
             )
-        live = wu.capture_rect_screen_left_third(
-            cfg.pinned_target_hwnd,
-            use_client_rect=cfg.use_window_client_rect,
-        )
-    elif is_fixed_screen_capture_mode(cfg.capture_mode) and cfg.pinned_target_hwnd > 0:
-        # Already assumed fitted; pin client/frame of left-third layout.
+
+    # Enlarge the reader window by capture_scale (aspect kept, clamped to the
+    # target monitor) for higher-resolution pages. Runs after any left-third fit.
+    _apply_capture_scale(cfg, progress)
+
+    if is_fixed_screen_capture_mode(cfg.capture_mode) and cfg.pinned_target_hwnd > 0:
+        # Pin the client (or frame) rect of the current reader window layout.
         live = wu.capture_rect_screen_left_third(
             cfg.pinned_target_hwnd,
             use_client_rect=cfg.use_window_client_rect,

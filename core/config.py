@@ -271,6 +271,13 @@ class CaptureConfig:
     # Stop capture after this many consecutive identical screenshots (book ended
     # but n_pages not yet exhausted). 0 disables the check.
     stop_repeat_pages: int = 2
+    # Enlarge the reader window by this factor (aspect kept, clamped to the target
+    # monitor) before capture, for higher-resolution pages. 1.0 = off. Works on any
+    # display: physical, RDP virtual, or console virtual-display-driver monitor.
+    capture_scale: float = 1.0
+    # Monitor index (from ``windows_util.list_monitors``) to place/enlarge the reader
+    # window on. -1 = primary. Enumerate with the ``monitors`` CLI command.
+    capture_monitor: int = -1
     next_key: str = "pagedown"
     # Clicks on the page before each capture: they focus the reader and let its
     # hover overlay (page arrows, toolbar) appear and fade before the screenshot.
@@ -310,6 +317,8 @@ class CaptureConfig:
         self.assemble_style = self.assemble_style.strip().lower()
         self.key_delivery = normalize_key_delivery(self.key_delivery)
         self.pdf_device = self.pdf_device.strip().lower()
+        self.capture_scale = float(self.capture_scale)
+        self.capture_monitor = int(self.capture_monitor)
         self.start_focus_x_ratio = float(self.start_focus_x_ratio)
         self.start_focus_y_ratio = float(self.start_focus_y_ratio)
         return self
@@ -472,6 +481,8 @@ class CaptureConfig:
                 "pdf_device must be empty or one of: "
                 + ", ".join(sorted(PDF_DEVICE_PRESETS))
             )
+        if self.capture_scale < 1.0 or self.capture_scale > 8.0:
+            raise ValueError("capture_scale must be between 1.0 and 8.0")
         normalize_key_delivery(self.key_delivery)
 
     @classmethod
@@ -505,6 +516,8 @@ class CaptureConfig:
             debug_capture_max_pages=int(data.get("debug_capture_max_pages", 5)),
             delay_sec=float(data.get("delay_sec", 1.0)),
             stop_repeat_pages=int(data.get("stop_repeat_pages", 2)),
+            capture_scale=float(data.get("capture_scale", 1.0)),
+            capture_monitor=int(data.get("capture_monitor", -1)),
             next_key=str(data.get("next_key", "pagedown")),
             reader_focus_clicks=int(data.get("reader_focus_clicks", 2)),
             reader_focus_x_ratio=float(data.get("reader_focus_x_ratio", 0.5)),

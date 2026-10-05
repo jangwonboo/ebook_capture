@@ -976,6 +976,125 @@ def screen_left_third_rect() -> tuple[int, int, int, int]:
     return 0, 0, max(1, sw // 3), sh
 
 
+# --- Monitor enumeration + arbitrary window fit (capture_scale / capture_monitor) ---
+# Works on whatever display backs the current desktop: physical panel, an RDP
+# virtual display, or a console-side virtual-display-driver monitor. Enlarging
+# the reader window on the active monitor is environment-agnostic.
+
+class _MONITORINFOEXW(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("rcMonitor", wintypes.RECT),
+        ("rcWork", wintypes.RECT),
+        ("dwFlags", wintypes.DWORD),
+        ("szDevice", ctypes.c_wchar * 32),
+    ]
+
+
+_MONITORENUMPROC = ctypes.WINFUNCTYPE(
+    ctypes.c_int,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.POINTER(wintypes.RECT),
+    ctypes.c_double,
+)
+
+
+def list_monitors() -> list[dict]:
+    """Monitors on the current desktop, virtual-desktop coords (physical pixels).
+
+    Each entry: index, left, top, width, height, work=(l,t,w,h), primary, device.
+    Returns [] off Windows. In an RDP session this is the RDP virtual display.
+    """
+    if sys.platform != "win32":
+        return []
+    user32 = ctypes.windll.user32
+    try:  # physical pixels, consistent with capture
+        user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
+    except Exception:
+        pass
+    out: list[dict] = []
+
+    def _cb(hmon, _hdc, _lprc, _lp):
+        mi = _MONITORINFOEXW()
+        mi.cbSize = ctypes.sizeof(_MONITORINFOEXW)
+        if user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+            m, w = mi.rcMonitor, mi.rcWork
+            out.append(
+                {
+                    "index": len(out),
+                    "left": int(m.left),
+                    "top": int(m.top),
+                    "width": int(m.right - m.left),
+                    "height": int(m.bottom - m.top),
+                    "work": (
+                        int(w.left),
+                        int(w.top),
+                        int(w.right - w.left),
+                        int(w.bottom - w.top),
+                    ),
+                    "primary": bool(mi.dwFlags & 1),
+                    "device": str(mi.szDevice),
+                }
+            )
+        return 1
+
+    user32.EnumDisplayMonitors(None, None, _MONITORENUMPROC(_cb), 0)
+    return out
+
+
+def monitor_rect(
+    index: int, *, use_work_area: bool = True
+) -> tuple[int, int, int, int] | None:
+    """Rect of monitor ``index`` (<0 = primary). None if index out of range."""
+    mons = list_monitors()
+    if not mons:
+        return None
+    if index is None or index < 0:
+        chosen = next((m for m in mons if m["primary"]), mons[0])
+    elif index < len(mons):
+        chosen = mons[index]
+    else:
+        return None
+    if use_work_area:
+        return chosen["work"]
+    return (chosen["left"], chosen["top"], chosen["width"], chosen["height"])
+
+
+def clamp_size_keep_aspect(
+    w: int, h: int, max_w: int, max_h: int
+) -> tuple[int, int, float]:
+    """Shrink (w,h) uniformly to fit within (max_w,max_h); return (w,h,factor).
+
+    factor is the applied shrink (1.0 = no clamp). Aspect ratio preserved.
+    """
+    if w <= 0 or h <= 0:
+        return w, h, 1.0
+    factor = 1.0
+    if max_w > 0 and w > max_w:
+        factor = min(factor, max_w / w)
+    if max_h > 0 and h > max_h:
+        factor = min(factor, max_h / h)
+    return max(1, int(round(w * factor))), max(1, int(round(h * factor))), factor
+
+
+def fit_window_to_rect(
+    hwnd: int, left: int, top: int, width: int, height: int
+) -> tuple[int, int, int, int]:
+    """Move/resize the outer window to an arbitrary screen rect."""
+    if sys.platform != "win32" or hwnd <= 0:
+        raise RuntimeError("fit_window_to_rect requires a Windows HWND")
+    user32 = ctypes.windll.user32
+    SWP_SHOWWINDOW = 0x0040
+    SWP_NOZORDER = 0x0004
+    user32.SetWindowPos(
+        int(hwnd), 0, int(left), int(top), int(width), int(height),
+        SWP_SHOWWINDOW | SWP_NOZORDER,
+    )
+    time.sleep(0.2)
+    return int(left), int(top), int(width), int(height)
+
+
 def frame_screen_rect_for_hwnd(hwnd: int) -> tuple[int, int, int, int]:
     """Outer window rect (title bar + borders) in screen pixels."""
     if sys.platform != "win32" or hwnd <= 0:

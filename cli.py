@@ -124,6 +124,24 @@ def _add_capture_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--pages", type=int, metavar="N", default=None)
     parser.add_argument("--start-page", type=int, dest="start_page", default=None)
     parser.add_argument(
+        "--capture-scale",
+        type=float,
+        dest="capture_scale",
+        default=None,
+        metavar="F",
+        help="Enlarge reader window by this factor before capture (aspect kept, "
+        "clamped to the target monitor). 1.0 = off.",
+    )
+    parser.add_argument(
+        "--capture-monitor",
+        type=int,
+        dest="capture_monitor",
+        default=None,
+        metavar="N",
+        help="Monitor index to place/enlarge the reader on (-1 = primary). "
+        "List indices with the 'monitors' command.",
+    )
+    parser.add_argument(
         "--capture-mode",
         choices=[
             CAPTURE_MANUAL,
@@ -180,6 +198,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     gui = sub.add_parser("gui", help="PyQt5 GUI.")
     gui.set_defaults(_handler=_cmd_gui)
+
+    mons = sub.add_parser(
+        "monitors",
+        help="List monitors (index/resolution) for --capture-monitor.",
+    )
+    mons.set_defaults(_handler=_cmd_monitors)
 
     run = sub.add_parser(
         "run",
@@ -278,6 +302,10 @@ def _apply_args(cfg: CaptureConfig, args: argparse.Namespace) -> CaptureConfig:
         cfg.n_pages = int(args.pages)
     if getattr(args, "start_page", None) is not None:
         cfg.start_page = int(args.start_page)
+    if getattr(args, "capture_scale", None) is not None:
+        cfg.capture_scale = float(args.capture_scale)
+    if getattr(args, "capture_monitor", None) is not None:
+        cfg.capture_monitor = int(args.capture_monitor)
     if hasattr(args, "capture_mode"):
         cfg.capture_mode = str(args.capture_mode)
     if hasattr(args, "window_title"):
@@ -376,6 +404,24 @@ def _cmd_gui(_: argparse.Namespace) -> int:
     from gui.app import run_gui
 
     run_gui()
+    return 0
+
+
+def _cmd_monitors(_: argparse.Namespace) -> int:
+    from core import windows_util as wu
+
+    monitors = wu.list_monitors()
+    if not monitors:
+        print("No monitors enumerated (non-Windows, or display unavailable).")
+        return 1
+    print(f"{len(monitors)} monitor(s):")
+    for m in monitors:
+        tag = "PRIMARY" if m["primary"] else "ext"
+        print(
+            f"  [{m['index']}] {m['width']}x{m['height']} "
+            f"origin=({m['left']},{m['top']}) work={m['work']} {tag} {m['device']}"
+        )
+    print("Use --capture-monitor <index> with --capture-scale to enlarge capture.")
     return 0
 
 

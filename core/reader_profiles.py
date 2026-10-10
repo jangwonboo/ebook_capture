@@ -18,6 +18,7 @@ from typing import Any, Mapping
 
 from core.config import (
     CAPTURE_SCREEN_LEFT_THIRD,
+    CAPTURE_WINDOW_FULL,
     KEY_DELIVERY_PYAUTOGUI,
     KEY_DELIVERY_SENDINPUT,
     WINDOW_CAPTURE_SCREEN,
@@ -49,6 +50,12 @@ _OVERRIDE_FIELDS = (
     "start_focus_x_ratio",
     "start_focus_y_ratio",
     "pdf_trim",
+    "pdf_auto_crop",
+    "pdf_auto_crop_margin",
+    "keep_pointer_outside",
+    "settle_stable_sec",
+    "settle_max_sec",
+    "page_turn_retries",
 )
 
 
@@ -78,6 +85,14 @@ class ReaderProfile:
     start_focus_y_ratio: float | None = None
     # PDF margin trim ratios (of captured image width/height).
     pdf_trim: PdfTrim | None = None
+    # Post-capture outline detection → common crop for the PDF.
+    pdf_auto_crop: bool | None = None
+    pdf_auto_crop_margin: float | None = None
+    # Pointer parking / overlay settle / page-turn retry (see CaptureConfig).
+    keep_pointer_outside: bool | None = None
+    settle_stable_sec: float | None = None
+    settle_max_sec: float | None = None
+    page_turn_retries: int | None = None
 
     def apply_to(self, cfg: CaptureConfig) -> list[str]:
         """Apply set (non-None) fields onto ``cfg``; return human-readable notes."""
@@ -90,8 +105,18 @@ class ReaderProfile:
                 value = normalize_key_delivery(str(value))
             elif field_name in ("reader_focus_clicks", "start_focus_clicks"):
                 value = max(0, min(int(value), 5))
-            elif field_name in ("delay_sec", "focus_click_settle_sec"):
+            elif field_name in (
+                "delay_sec",
+                "focus_click_settle_sec",
+                "settle_stable_sec",
+                "settle_max_sec",
+                "pdf_auto_crop_margin",
+            ):
                 value = float(value)
+            elif field_name == "page_turn_retries":
+                value = max(0, min(int(value), 10))
+            elif field_name in ("pdf_auto_crop", "keep_pointer_outside"):
+                value = bool(value)
             elif field_name in (
                 "start_focus_x_ratio",
                 "start_focus_y_ratio",
@@ -175,6 +200,17 @@ _ALADIN_APP_TOP_TITLE_RATIO = 0.010
 _ALADIN_APP_TOP_TOOLBAR_FILL_RATIO = 0.026
 _ALADIN_APP_BOTTOM_NAV_RATIO = 0.045
 
+# Reader inside an RDP session (mstsc window). The remote reader draws its own
+# page-turn toolbar for a moment after each key and on any pointer motion, so
+# the pointer stays parked beside the window and each shot is repeated until
+# two consecutive frames match. Keys travel through RDP, which only forwards
+# input while mstsc is the foreground window — hence retries on a non-moving
+# page. Verified 2026-10-10 on a 1438x1761 client area (remote 1440x1880).
+_RDP_DELAY_SEC = 1.6
+_RDP_SETTLE_STABLE_SEC = 0.4
+_RDP_SETTLE_MAX_SEC = 4.0
+_RDP_PAGE_TURN_RETRIES = 2
+
 
 # Built-in profiles. ``target_window_title`` is only set where the title is
 # stable across machines (Kindle desktop app). Browser tabs vary, so those are
@@ -239,6 +275,40 @@ _BUILTIN_PROFILES: tuple[ReaderProfile, ...] = (
         next_key="pagedown",
         key_delivery=KEY_DELIVERY_PYAUTOGUI,
         **_proven_capture_defaults(),
+    ),
+    ReaderProfile(
+        name="rdp_full",
+        label="Reader inside a Remote Desktop window (full RDP client area)",
+        note=(
+            "Captures the whole mstsc client area; the remote reader should be "
+            "full-screen inside the session. API foreground only (no clicks), "
+            "pointer parked beside the window, shots repeated until the remote "
+            "overlay has faded, key resent if the page did not move. PDF crop is "
+            "detected from the captured pages (pdf_auto_crop)."
+        ),
+        capture_mode=CAPTURE_WINDOW_FULL,
+        next_key="right",
+        key_delivery=KEY_DELIVERY_SENDINPUT,
+        target_window_title="Remote Desktop Connection",
+        window_capture_backend=WINDOW_CAPTURE_SCREEN,
+        use_window_client_rect=True,
+        hide_cursor_during_capture=True,
+        delay_sec=_RDP_DELAY_SEC,
+        reader_focus_clicks=0,
+        reader_focus_x_ratio=0.5,
+        reader_focus_y_ratio=0.5,
+        focus_click_settle_sec=1.0,
+        fit_on_start=False,
+        start_focus_clicks=0,
+        start_focus_x_ratio=0.5,
+        start_focus_y_ratio=0.5,
+        pdf_trim=PdfTrim(),
+        pdf_auto_crop=True,
+        pdf_auto_crop_margin=0.0,
+        keep_pointer_outside=True,
+        settle_stable_sec=_RDP_SETTLE_STABLE_SEC,
+        settle_max_sec=_RDP_SETTLE_MAX_SEC,
+        page_turn_retries=_RDP_PAGE_TURN_RETRIES,
     ),
 )
 

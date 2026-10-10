@@ -271,6 +271,12 @@ class CaptureConfig:
     # Stop capture after this many consecutive identical screenshots (book ended
     # but n_pages not yet exhausted). 0 disables the check.
     stop_repeat_pages: int = 2
+    # Two shots count as the same page when the mean difference of their
+    # grayscale thumbnails is at or below this value (0.0 = exact pixel match).
+    # A reader's hover arrow / progress overlay moves the mean by ~0.003; a real
+    # page turn between similar text pages by ~4. Used by end-of-book detection
+    # and by the page-turn retry.
+    stop_repeat_tolerance: float = 0.3
     # Enlarge the reader window by this factor (aspect kept, clamped to the target
     # monitor) before capture, for higher-resolution pages. 1.0 = off. Works on any
     # display: physical, RDP virtual, or console virtual-display-driver monitor.
@@ -294,9 +300,30 @@ class CaptureConfig:
     start_focus_y_ratio: float = 0.5
     # PDF crop margins as ratios of captured image size.
     pdf_trim: PdfTrim = field(default_factory=PdfTrim)
+    # After capture, detect the page outline shared by all PNGs (from pages with
+    # a full-bleed background) and crop every PDF page to it. Replaces the
+    # left/right/top/bottom crop of ``pdf_trim`` (fill_* still apply).
+    pdf_auto_crop: bool = False
+    # Extra margin kept around the detected outline, as a ratio of width/height.
+    pdf_auto_crop_margin: float = 0.0
     # Pad each PDF page with white margins to this device's screen aspect ratio
     # ("kindle_scribe" | "kindle_colorsoft" | "" = off). See PDF_DEVICE_PRESETS.
     pdf_device: str = ""
+    # Never move the pointer into the capture rect (park it beside the window
+    # once). Readers inside RDP / browsers show hover toolbars on any pointer
+    # motion over the page, which would otherwise end up in the screenshot.
+    keep_pointer_outside: bool = False
+    # Overlay settle: re-shoot every ``settle_stable_sec`` until two consecutive
+    # shots are identical (fading page-turn toolbars / progress bars), giving up
+    # after ``settle_max_sec``. 0.0 disables the check.
+    settle_stable_sec: float = 0.0
+    settle_max_sec: float = 4.0
+    # When the screenshot did not change after next_key (reader lost focus, key
+    # dropped), re-foreground the window and resend the key this many times
+    # before treating the page as a repeat.
+    page_turn_retries: int = 0
+    # Hold off the screensaver / display sleep for the duration of the capture.
+    prevent_sleep: bool = True
     output_mode: str = OUTPUT_PDF
     skip_capture: bool = False
     resume: bool = True
@@ -483,6 +510,16 @@ class CaptureConfig:
             )
         if self.capture_scale < 1.0 or self.capture_scale > 8.0:
             raise ValueError("capture_scale must be between 1.0 and 8.0")
+        if self.stop_repeat_tolerance < 0.0 or self.stop_repeat_tolerance > 50.0:
+            raise ValueError("stop_repeat_tolerance must be between 0.0 and 50.0")
+        if self.pdf_auto_crop_margin < 0.0 or self.pdf_auto_crop_margin > 0.2:
+            raise ValueError("pdf_auto_crop_margin must be between 0.0 and 0.2")
+        if self.settle_stable_sec < 0.0 or self.settle_stable_sec > 5.0:
+            raise ValueError("settle_stable_sec must be between 0.0 and 5.0")
+        if self.settle_max_sec < 0.0 or self.settle_max_sec > 60.0:
+            raise ValueError("settle_max_sec must be between 0.0 and 60.0")
+        if self.page_turn_retries < 0 or self.page_turn_retries > 10:
+            raise ValueError("page_turn_retries must be between 0 and 10")
         normalize_key_delivery(self.key_delivery)
 
     @classmethod
@@ -516,6 +553,7 @@ class CaptureConfig:
             debug_capture_max_pages=int(data.get("debug_capture_max_pages", 5)),
             delay_sec=float(data.get("delay_sec", 1.0)),
             stop_repeat_pages=int(data.get("stop_repeat_pages", 2)),
+            stop_repeat_tolerance=float(data.get("stop_repeat_tolerance", 0.3)),
             capture_scale=float(data.get("capture_scale", 1.0)),
             capture_monitor=int(data.get("capture_monitor", -1)),
             next_key=str(data.get("next_key", "pagedown")),
@@ -529,7 +567,14 @@ class CaptureConfig:
             start_focus_x_ratio=float(data.get("start_focus_x_ratio", 0.5)),
             start_focus_y_ratio=float(data.get("start_focus_y_ratio", 0.5)),
             pdf_trim=pdf_trim_from_mapping(data),
+            pdf_auto_crop=bool(data.get("pdf_auto_crop", False)),
+            pdf_auto_crop_margin=float(data.get("pdf_auto_crop_margin", 0.0)),
             pdf_device=str(data.get("pdf_device", "")),
+            keep_pointer_outside=bool(data.get("keep_pointer_outside", False)),
+            settle_stable_sec=float(data.get("settle_stable_sec", 0.0)),
+            settle_max_sec=float(data.get("settle_max_sec", 4.0)),
+            page_turn_retries=int(data.get("page_turn_retries", 0)),
+            prevent_sleep=bool(data.get("prevent_sleep", True)),
             output_mode=_output_mode_from_mapping(data),
             skip_capture=bool(data.get("skip_capture", False)),
             resume=bool(data.get("resume", True)),

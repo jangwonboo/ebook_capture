@@ -119,6 +119,41 @@
       "start_focus_x_ratio": 0.5,
       "start_focus_y_ratio": 0.5,
       "pdf_trim": { "left": 0.0, "right": 0.0, "top": 0.0, "bottom": 0.0 }
+    },
+    {
+      "name": "rdp_full",
+      "label": "Reader inside a Remote Desktop window (full RDP client area)",
+      "note": "mstsc client 영역 전체 캡처. 원격 리더는 세션 안에서 전체 화면. 클릭 없음(API 포그라운드), 포인터는 창 옆에 고정, 오버레이가 사라질 때까지 재촬영, 페이지가 안 움직이면 키 재전송. PDF crop은 캡처본에서 자동 추출(pdf_auto_crop).",
+      "capture_mode": "window_full",
+      "next_key": "right",
+      "key_delivery": "sendinput",
+      // 창 제목 부분 일치. 세션 이름이 바뀌어도 mstsc 접미사는 고정.
+      "target_window_title": "Remote Desktop Connection",
+      "reader_focus_clicks": 0,
+      "reader_focus_x_ratio": 0.5,
+      "reader_focus_y_ratio": 0.5,
+      "focus_click_settle_sec": 1.0,
+      "window_capture_backend": "screen",
+      "use_window_client_rect": true,
+      "hide_cursor_during_capture": true,
+      // 포인터가 원격 리더 위를 지나면 hover 툴바가 뜸 -> 창 옆에 세워 두고 되돌리지 않음.
+      "keep_pointer_outside": true,
+      // 2026-10-10 검증: 1438x1761 client(원격 1440x1880, 모니터 높이 1800 꽉 채움).
+      // 해상도는 로컬 모니터 높이가 상한. capture_scale 은 1.0(이미 최대 높이)로 둠.
+      "delay_sec": 1.6,
+      // 키 입력 후 원격 리더의 페이지 넘김 바가 사라질 때까지 0.4s 간격 재촬영(최대 4s).
+      "settle_stable_sec": 0.4,
+      "settle_max_sec": 4.0,
+      // 화면이 안 바뀌면(포커스 이탈로 키 유실) 재포그라운드 + 키 재전송 2회.
+      "page_turn_retries": 2,
+      "fit_on_start": false,
+      "start_focus_clicks": 0,
+      "start_focus_x_ratio": 0.5,
+      "start_focus_y_ratio": 0.5,
+      // 고정 trim 없음: 캡처 완료 후 배경 있는 페이지(표지, 장 표제지)에서 공통 윤곽을 뽑아 crop.
+      "pdf_trim": { "left": 0.0, "right": 0.0, "top": 0.0, "bottom": 0.0 },
+      "pdf_auto_crop": true,
+      "pdf_auto_crop_margin": 0.0
     }
   ]
 }

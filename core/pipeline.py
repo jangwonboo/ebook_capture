@@ -147,6 +147,34 @@ def _fingerprint_mean_diff(before, after) -> float:
     return sum(i * count for i, count in enumerate(hist)) / total
 
 
+def _page_fingerprint(shot: Any) -> Any:
+    """Grayscale thumbnail of a shot for same-page comparison.
+
+    Objects without ``convert`` (test doubles) fall back to their raw bytes,
+    which only ever compare exactly.
+    """
+    if hasattr(shot, "convert"):
+        return shot.convert("L").resize((160, 260))
+    return shot.tobytes()
+
+
+def _same_page(cfg: CaptureConfig, prev: Any, cur: Any) -> tuple[bool, float]:
+    """Whether two fingerprints show the same page; returns (same, mean_diff).
+
+    ``stop_repeat_tolerance`` absorbs reader overlays (hover arrows, progress
+    bar) that change a few pixels without the page having moved.
+    """
+    if prev is None:
+        return False, float("inf")
+    if isinstance(prev, (bytes, bytearray)) or isinstance(cur, (bytes, bytearray)):
+        return prev == cur, 0.0 if prev == cur else float("inf")
+    diff = _fingerprint_mean_diff(prev, cur)
+    tol = max(0.0, float(cfg.stop_repeat_tolerance))
+    if tol <= 0.0:
+        return prev.tobytes() == cur.tobytes(), diff
+    return diff <= tol, diff
+
+
 def _send_page_turn_key(cfg: CaptureConfig, progress: ProgressFn | None) -> None:
     """Activate target window and send next_key (focus clicks happen pre-capture)."""
     if cfg.capture_mode == CAPTURE_MANUAL:
@@ -156,16 +184,26 @@ def _send_page_turn_key(cfg: CaptureConfig, progress: ProgressFn | None) -> None
 
     left, top, w, h = _screen_region(cfg)
     before = _region_fingerprint(left, top, w, h) if cfg.debug_capture else None
-    ok, detail = wu.send_page_turn_key(
-        cfg.next_key,
-        pinned_hwnd=cfg.pinned_target_hwnd,
-        title=cfg.target_window_title,
-        prefer_foreground=cfg.prefer_foreground_window_match,
-        capture_rect=(left, top, w, h),
-        reader_focus_clicks=0,
-        key_delivery=cfg.key_delivery,
-    )
-    _emit(progress, f"TARGET_KEY_SENT key={cfg.next_key!r} ok={ok} {detail}")
+    attempts = 1 + max(0, int(cfg.page_turn_retries))
+    for attempt in range(1, attempts + 1):
+        ok, detail = wu.send_page_turn_key(
+            cfg.next_key,
+            pinned_hwnd=cfg.pinned_target_hwnd,
+            title=cfg.target_window_title,
+            prefer_foreground=cfg.prefer_foreground_window_match,
+            capture_rect=(left, top, w, h),
+            reader_focus_clicks=0,
+            key_delivery=cfg.key_delivery,
+        )
+        _emit(progress, f"TARGET_KEY_SENT key={cfg.next_key!r} ok={ok} {detail}")
+        if ok or attempt == attempts:
+            break
+        # Foreground was stolen (user clicked elsewhere, RDP reconnect banner,
+        # notification): re-activate and try again instead of silently
+        # capturing the same page twice.
+        _emit(progress, f"TARGET_KEY_RETRY attempt {attempt}/{attempts - 1} re-foregrounding")
+        time.sleep(0.5)
+        _activate_target(cfg)
     if before is not None:
         time.sleep(cfg.delay_sec)
         moved = _fingerprint_mean_diff(before, _region_fingerprint(left, top, w, h))
@@ -479,7 +517,10 @@ def _capture_one_page(
                     _emit(progress, f"DEBUG_RECT printwindow_failed {ex!r}")
 
     if shot is None:
-        _ensure_pointer_in_capture_rect(left, top, w, h, progress)
+        if cfg.keep_pointer_outside:
+            _park_pointer_outside_capture_rect(left, top, w, h, progress)
+        else:
+            _ensure_pointer_in_capture_rect(left, top, w, h, progress)
         if cfg.debug_capture:
             cx, cy = pyautogui.position()
             _emit(progress, f"DEBUG_RECT cursor_after_pointer_adjust x={cx} y={cy}")
@@ -488,14 +529,73 @@ def _capture_one_page(
         if cfg.debug_capture:
             _emit(progress, "DEBUG_RECT capture_backend=screen_region (mss / pyautogui)")
         try:
-            if cfg.hide_cursor_during_capture:
+            if cfg.hide_cursor_during_capture and not cfg.keep_pointer_outside:
                 restore_pointer = _move_pointer_outside_capture_rect(
                     left, top, w, h, progress
                 )
-            shot = screenshot_region(left, top, w, h)
+            shot = _screenshot_until_stable(cfg, left, top, w, h, progress)
         finally:
             _restore_pointer(restore_pointer, progress)
     return shot
+
+
+def _park_pointer_outside_capture_rect(
+    left: int,
+    top: int,
+    width: int,
+    height: int,
+    progress: ProgressFn | None,
+) -> None:
+    """Keep the pointer beside the reader for the whole run (no restore).
+
+    Any pointer motion over a reader hosted in RDP or a browser pops its hover
+    toolbar, so unlike ``_ensure_pointer_in_capture_rect`` the pointer is never
+    moved back inside the capture rect.
+    """
+    if width < 1 or height < 1:
+        return
+    x, y = pyautogui.position()
+    inside = left <= x < left + width and top <= y < top + height
+    if not inside:
+        return
+    _move_pointer_outside_capture_rect(left, top, width, height, progress)
+
+
+def _screenshot_until_stable(
+    cfg: CaptureConfig,
+    left: int,
+    top: int,
+    width: int,
+    height: int,
+    progress: ProgressFn | None,
+) -> Image.Image:
+    """Screenshot the rect; with ``settle_stable_sec`` > 0, keep re-shooting
+    until two consecutive frames are identical (page-turn toolbar / progress
+    bar faded) or ``settle_max_sec`` has passed."""
+    shot = screenshot_region(left, top, width, height)
+    interval = float(cfg.settle_stable_sec)
+    if interval <= 0.0:
+        return shot
+    deadline = time.monotonic() + max(0.0, float(cfg.settle_max_sec))
+    prev = shot.tobytes()
+    extra = 0
+    while True:
+        time.sleep(interval)
+        extra += 1
+        nxt = screenshot_region(left, top, width, height)
+        cur = nxt.tobytes()
+        if cur == prev:
+            if extra > 1:
+                _emit(progress, f"SETTLE_STABLE after {extra} extra shot(s)")
+            return nxt
+        shot, prev = nxt, cur
+        if time.monotonic() >= deadline:
+            _emit(
+                progress,
+                f"SETTLE_TIMEOUT frame still changing after {cfg.settle_max_sec:.1f}s; "
+                "using last shot",
+            )
+            return shot
 
 
 def _apply_capture_scale(cfg: CaptureConfig, progress: ProgressFn | None) -> None:
@@ -629,6 +729,48 @@ def _unmark_page(
     _save_state(cfg, state)
 
 
+def _retry_page_turn(
+    cfg: CaptureConfig,
+    page_num: int,
+    page_index: int,
+    n_run: int,
+    prev_fp: Any,
+    first_diff: float,
+    progress: ProgressFn | None,
+) -> tuple[Image.Image, Any, bool]:
+    """Resend next_key and re-shoot until the frame differs from ``prev_fp``
+    (beyond ``stop_repeat_tolerance``) or ``page_turn_retries`` is used up.
+    Returns ``(shot, fingerprint, still_same)``."""
+    retries = max(0, int(cfg.page_turn_retries))
+    shot: Image.Image | None = None
+    fp = prev_fp
+    diff = first_diff
+    for attempt in range(1, retries + 1):
+        _emit(
+            progress,
+            f"PAGE_TURN_RETRY page#{page_num} attempt {attempt}/{retries}: "
+            f"frame unchanged after next_key (meandiff={diff:.3f} <= "
+            f"{cfg.stop_repeat_tolerance:.3f}); re-foreground and resend",
+        )
+        _focus_reader_before_capture(cfg, progress)
+        _send_page_turn_key(cfg, progress)
+        time.sleep(cfg.delay_sec)
+        _focus_reader_before_capture(cfg, progress)
+        shot = _capture_one_page(cfg, page_num, page_index, n_run, progress)
+        fp = _page_fingerprint(shot)
+        same, diff = _same_page(cfg, prev_fp, fp)
+        if not same:
+            _emit(
+                progress,
+                f"PAGE_TURN_RETRY_OK page#{page_num} moved on attempt {attempt} "
+                f"(meandiff={diff:.3f})",
+            )
+            return shot, fp, False
+    assert shot is not None
+    _emit(progress, f"PAGE_TURN_RETRY_EXHAUSTED page#{page_num} still unchanged")
+    return shot, fp, True
+
+
 def _run_phase_capture(
     cfg: CaptureConfig,
     state: dict[str, Any],
@@ -637,13 +779,11 @@ def _run_phase_capture(
 ) -> int:
     """Capture up to ``n_run`` pages; return the effective page count (may be
     smaller when the book ends early and identical screenshots repeat)."""
-    import hashlib
-
     _emit(progress, "Phase I: capture PNG")
     _pin_capture_target(cfg, progress)
     skipped_any = False
     settled = False
-    prev_digest: str | None = None
+    prev_fp: Any = None
     repeats = 0
     for i, page_num in enumerate(cfg.page_numbers(n_run)):
         img_path = cfg.page_png_path(page_num)
@@ -655,7 +795,7 @@ def _run_phase_capture(
             lambda path=img_path: _valid_png(path),
         ):
             skipped_any = True
-            prev_digest = None
+            prev_fp = None
             repeats = 0
             _emit(progress, f"IMAGE_SKIP page#{page_num} {img_path}")
             continue
@@ -674,8 +814,17 @@ def _run_phase_capture(
         _focus_reader_before_capture(cfg, progress)
         try:
             shot = _capture_one_page(cfg, page_num, i, n_run, progress)
-            digest = hashlib.sha1(shot.tobytes()).hexdigest()
-            if cfg.stop_repeat_pages > 0 and digest == prev_digest:
+            fp = _page_fingerprint(shot)
+            same, diff = _same_page(cfg, prev_fp, fp)
+            if same and cfg.page_turn_retries > 0:
+                # The page did not move after next_key. Most often the reader
+                # lost keyboard focus (RDP forwards keys only while mstsc is in
+                # the foreground). Re-foreground, resend, re-shoot before
+                # deciding the book has ended.
+                shot, fp, same = _retry_page_turn(
+                    cfg, page_num, i, n_run, prev_fp, diff, progress
+                )
+            if cfg.stop_repeat_pages > 0 and same:
                 repeats += 1
                 if repeats >= cfg.stop_repeat_pages:
                     # Page turn stopped advancing: the book ended before n_pages.
@@ -701,7 +850,7 @@ def _run_phase_capture(
                     return last_page - cfg.start_page + 1
             else:
                 repeats = 0
-            prev_digest = digest
+            prev_fp = fp
             _save_image_atomic(shot, img_path)
             if cfg.debug_capture:
                 _emit(
@@ -843,8 +992,34 @@ def _run_phase_pdf(
     from core.config import pdf_device_aspect
 
     _emit(progress, "Phase III: image PDF")
-    if cfg.pdf_trim.is_active():
-        _emit(progress, f"PDF_TRIM {cfg.pdf_trim.as_dict()}")
+    trim = cfg.pdf_trim
+    if cfg.pdf_auto_crop:
+        from core.auto_crop import outline_to_trim, page_outline_from_images
+
+        pngs = [cfg.page_png_path(p) for p in cfg.page_numbers(n_run)]
+        outline = page_outline_from_images(
+            [p for p in pngs if _valid_png(p)],
+            margin=cfg.pdf_auto_crop_margin,
+            progress=progress,
+        )
+        trim = outline_to_trim(outline, cfg.pdf_trim)
+        l, t, r, b = outline.as_tuple()
+        _emit(
+            progress,
+            f"PDF_AUTO_CROP source={outline.source} "
+            f"solid_pages={outline.n_solid}/{outline.n_pages} "
+            f"outline=({l:.4f},{t:.4f},{r:.4f},{b:.4f}) trim={trim.as_dict()}",
+        )
+        # Per-page PDFs built under a different crop must not be reused.
+        crop_key = trim.as_dict()
+        if state.get("pdf_crop") != crop_key:
+            if state.get("phases", {}).get(PHASE_PDF):
+                _emit(progress, "PDF_AUTO_CROP crop changed; rebuilding page PDFs")
+            state.setdefault("phases", {})[PHASE_PDF] = {}
+            state["pdf_crop"] = crop_key
+            _save_state(cfg, state)
+    if trim.is_active():
+        _emit(progress, f"PDF_TRIM {trim.as_dict()}")
     page_aspect = pdf_device_aspect(cfg.pdf_device)
     if page_aspect > 0.0:
         _emit(progress, f"PDF_DEVICE {cfg.pdf_device} aspect={page_aspect:.4f}")
@@ -868,7 +1043,7 @@ def _run_phase_pdf(
                 continue
             try:
                 part = _part_path(page_pdf)
-                build_page_image_pdf(png, part, trim=cfg.pdf_trim, page_aspect=page_aspect)
+                build_page_image_pdf(png, part, trim=trim, page_aspect=page_aspect)
                 os.replace(part, page_pdf)
                 if not _valid_pdf(page_pdf):
                     raise RuntimeError(f"Generated invalid PDF page: {page_pdf}")
@@ -924,7 +1099,15 @@ def run_capture(
             )
 
     if cfg.run_capture_phase:
-        n_run = _run_phase_capture(cfg, state, n_run, progress)
+        from core.windows_util import keep_display_awake
+
+        with keep_display_awake(cfg.prevent_sleep) as awake:
+            _emit(
+                progress,
+                f"SLEEP_BLOCK {'active' if awake.active else 'off'} "
+                "(screensaver / display sleep held off during capture)",
+            )
+            n_run = _run_phase_capture(cfg, state, n_run, progress)
     else:
         _emit(
             progress,

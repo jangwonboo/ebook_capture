@@ -101,6 +101,20 @@ def _add_run_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--resume", dest="resume", action="store_true", default=argparse.SUPPRESS)
     parser.add_argument("--no-resume", dest="resume", action="store_false")
     parser.add_argument(
+        "--pdf-auto-crop",
+        dest="pdf_auto_crop",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Detect the shared page outline from captured PNGs and crop PDF pages to it.",
+    )
+    parser.add_argument(
+        "--no-pdf-auto-crop",
+        dest="pdf_auto_crop",
+        action="store_false",
+        default=argparse.SUPPRESS,
+        help="Use pdf_trim ratios only (overrides a profile's pdf_auto_crop).",
+    )
+    parser.add_argument(
         "--force-phase",
         choices=[PHASE_CAPTURE, PHASE_OCR, PHASE_PDF, PHASE_ALL],
         default=argparse.SUPPRESS,
@@ -190,7 +204,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="ebook-capture",
         description=(
-            "Ebook capture: choose one output — --images, --pdf, or --text. "
+            "Ebook capture: choose one output: --images, --pdf, or --text. "
             "Missing steps are detected and confirmed before running."
         ),
     )
@@ -328,6 +342,8 @@ def _apply_args(cfg: CaptureConfig, args: argparse.Namespace) -> CaptureConfig:
         cfg.resume = bool(args.resume)
     if hasattr(args, "force_phase"):
         cfg.force_phase = str(args.force_phase)
+    if hasattr(args, "pdf_auto_crop"):
+        cfg.pdf_auto_crop = bool(args.pdf_auto_crop)
     if getattr(args, "window_frame", False):
         cfg.use_window_client_rect = False
     if getattr(args, "window_match_first", False):

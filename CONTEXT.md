@@ -6,6 +6,25 @@
 
 ---
 
+## 0. 2026-10-10 추가: `rdp_full` (원격 데스크톱 창 캡처)
+
+대상: mstsc 창("… - Remote Desktop Connection") 안에서 전체 화면으로 띄운 리더. `window_full` + `screen` 백엔드로 client 영역(1438x1761)을 그대로 찍는다. 3페이지 시험 캡처에서 `right`/SendInput으로 한 장씩 넘어감을 확인했다.
+
+이번에 들어간 동작 (코드: `core/pipeline.py`, `core/auto_crop.py`, `core/windows_util.keep_display_awake`):
+
+| 요구 | 구현 | 로그 키 |
+|------|------|---------|
+| 포커스가 나가도 캡처 유지 | 키 전송 실패 시 재포그라운드 후 재전송 (`page_turn_retries`), 화면이 전과 같으면 재포그라운드 + 키 재전송 + 재촬영 후에야 반복으로 간주 | `TARGET_KEY_RETRY`, `PAGE_TURN_RETRY*` |
+| 상하단 바 없는 상태에서 캡처 | 포인터를 창 옆에 세워 두고 되돌리지 않음 (`keep_pointer_outside`); 연속 두 장이 같아질 때까지 재촬영 (`settle_stable_sec`/`settle_max_sec`) | `SETTLE_STABLE`, `SETTLE_TIMEOUT` |
+| 화면 보호기 차단 | 캡처 phase 동안 `SetThreadExecutionState(ES_DISPLAY_REQUIRED)` (`prevent_sleep`) | `SLEEP_BLOCK` |
+| 책마다 다른 crop | 캡처 완료 후 PNG 전체에서 공통 페이지 윤곽 추출 → PDF crop (`pdf_auto_crop`). crop이 바뀌면 페이지 PDF 재생성 | `PDF_AUTO_CROP` |
+
+320페이지 전체 실행 결과 (`허깅페이스_트랜스포머_하드_트레이닝`): 키 실패·settle 타임아웃 0회, 자동 윤곽은 320장 모두 solid로 좌우 15px(RDP 검은 바)만 crop (`left=right=0.0104`, 상하 0). 책은 318쪽(판권지)에서 끝났고 319쪽에서 재시도 2회가 돌았다.
+
+끝 감지 허용치 (`stop_repeat_tolerance`, 기본 0.3): 320쪽은 판권지에 리더의 오른쪽 화살표 오버레이가 겹쳐 픽셀 해시가 달라졌고, 그래서 "책 끝"이 자동으로 안 걸렸다. 지금은 160x260 회색 썸네일의 평균 차이로 비교한다. 측정값: 오버레이 차이 0.003, 실제 넘김 최소 3.98 (같은 책 318쪽 연속 비교). 재시도 판단도 같은 기준을 쓴다. 0.0이면 예전처럼 완전 일치.
+
+미검증: 실제 포커스 이탈 상황에서의 재시도 경로 (단위 테스트만).
+
 ## 1. 한 줄 요약
 
 Kindle 데스크톱 앱에서 “중앙 클릭×2 → settle → 캡처 → right” 루프가 동작한다.  

@@ -129,6 +129,40 @@ def test_profile_applies_pdf_trim() -> None:
     assert cfg.pdf_trim.bottom == 0.03
 
 
+def test_apply_rdp_full_profile(tmp_path) -> None:
+    cfg = CaptureConfig(title="t", base_dir=str(tmp_path))
+    apply_reader_profile(cfg, "rdp_full")
+    assert cfg.capture_mode == "window_full"
+    assert cfg.target_window_title == "Remote Desktop Connection"
+    assert cfg.next_key == "right"
+    assert cfg.key_delivery == "sendinput"
+    assert cfg.window_capture_backend == "screen"
+    # No clicks: focus via API, pointer parked beside the mstsc window for good.
+    assert cfg.reader_focus_clicks == 0
+    assert cfg.keep_pointer_outside is True
+    assert cfg.hide_cursor_during_capture is True
+    # Overlay settle + focus-loss recovery.
+    assert cfg.settle_stable_sec == 0.4
+    assert cfg.settle_max_sec == 4.0
+    assert cfg.page_turn_retries == 2
+    # Crop is learned from the captured pages, not fixed.
+    assert cfg.pdf_trim.is_active() is False
+    assert cfg.pdf_auto_crop is True
+    assert cfg.pdf_auto_crop_margin == 0.0
+    cfg.validate()
+
+
+def test_profile_new_fields_are_optional() -> None:
+    """Profiles without the new keys must leave config values alone."""
+    cfg = CaptureConfig(
+        title="t", base_dir="/x", page_turn_retries=3, keep_pointer_outside=True
+    )
+    ReaderProfile(name="tmp", next_key="space").apply_to(cfg)
+    assert cfg.page_turn_retries == 3
+    assert cfg.keep_pointer_outside is True
+    assert cfg.pdf_auto_crop is False
+
+
 def test_reader_profile_roundtrips_in_config_json(tmp_path) -> None:
     cfg = CaptureConfig(
         title="t",

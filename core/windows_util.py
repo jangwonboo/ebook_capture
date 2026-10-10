@@ -1231,3 +1231,47 @@ def pin_target_window(
     force_foreground_hwnd(hwnd)
     time.sleep(0.1)
     return hwnd, (w.title or "").strip()
+
+
+# --- power / screensaver -----------------------------------------------------
+
+_ES_CONTINUOUS = 0x80000000
+_ES_SYSTEM_REQUIRED = 0x00000001
+_ES_DISPLAY_REQUIRED = 0x00000002
+
+
+class keep_display_awake:
+    """Context manager: block the screensaver, display-off and system sleep.
+
+    Uses ``SetThreadExecutionState`` for the calling thread while the block
+    runs and restores the default on exit. No-op off Windows or when the call
+    fails (``self.active`` tells which). An RDP session's own idle timer is
+    kept alive by the page-turn keys travelling through it.
+    """
+
+    def __init__(self, enabled: bool = True) -> None:
+        self.enabled = enabled
+        self.active = False
+
+    def __enter__(self) -> "keep_display_awake":
+        if not self.enabled or sys.platform != "win32":
+            return self
+        try:
+            kernel32 = ctypes.windll.kernel32
+            kernel32.SetThreadExecutionState.restype = ctypes.c_uint32
+            prev = kernel32.SetThreadExecutionState(
+                _ES_CONTINUOUS | _ES_SYSTEM_REQUIRED | _ES_DISPLAY_REQUIRED
+            )
+            self.active = prev != 0
+        except Exception:
+            self.active = False
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        if not self.active:
+            return
+        try:
+            ctypes.windll.kernel32.SetThreadExecutionState(_ES_CONTINUOUS)
+        except Exception:
+            pass
+        self.active = False

@@ -85,6 +85,25 @@ python -m ebook_capture run --title Book --base-dir E:\ebook --text --input-pdf 
 | `kindle_cloud` | Kindle Cloud Reader (브라우저) | right / pyautogui / 2@중앙 |
 | `aladin_app` | 알라딘 ebook 앱 | pagedown / sendinput / 2@중앙 |
 | `aladin_web` | 알라딘 웹 뷰어 | pagedown / pyautogui / 2@중앙 |
+| `rdp_full` | 원격 데스크톱(mstsc) 창 안의 리더 (client 영역 전체) | right / sendinput / 0 (API 포그라운드) |
+
+`rdp_full`은 다른 프로필과 루프가 다릅니다. 원격 리더는 세션 안에서 전체 화면으로 띄우고,
+로컬에서는 mstsc 창을 모니터 높이에 맞춰 둡니다 (2026-10-10 검증: client 1438x1761).
+
+| 항목 | 값 | 이유 |
+|------|----|------|
+| `keep_pointer_outside` | true | 포인터가 원격 리더 위를 지나면 hover 툴바가 뜸. 창 옆에 세워 두고 되돌리지 않음 |
+| `settle_stable_sec` / `settle_max_sec` | 0.4 / 4.0 | 키 입력 후 페이지 넘김 바가 사라질 때까지 연속 두 장이 같아질 때까지 재촬영 |
+| `page_turn_retries` | 2 | 화면이 안 바뀌면(포커스 이탈로 키 유실) 재포그라운드 + 키 재전송 후 재촬영 |
+| `pdf_auto_crop` | true | 고정 `pdf_trim` 대신 캡처 완료 후 페이지 공통 윤곽을 뽑아 crop (아래 참고) |
+| `prevent_sleep` | true (config 기본) | 캡처 중 화면 보호기·디스플레이 끄기 차단 (`SetThreadExecutionState`) |
+| `stop_repeat_tolerance` | 0.3 (config 기본) | 회색 썸네일 평균 차이가 이 값 이하면 같은 페이지로 봄. 리더 오버레이(화살표 등)는 ~0.003, 실제 넘김은 4 이상. 책 끝 감지와 키 재전송 판단에 공통 사용. 0.0 = 완전 일치 |
+
+`pdf_auto_crop`은 각 PNG의 바깥 테두리를 단계적으로 벗겨 가며 "채워진 상자"(검은 RDP 바에 대비되는 흰 페이지,
+페이지 안의 표지 그림)를 찾고, 페이지마다 가장 바깥의 채워진 상자를 모아 중앙값을 공통 윤곽으로 씁니다.
+배경 있는 페이지(표지, 장 표제지)가 윤곽을 결정하고, 글만 있는 페이지는 윤곽에 영향을 주지 않습니다.
+채워진 상자가 하나도 없으면 전 페이지 내용 상자의 합집합으로 대체합니다. 로그의 `PDF_AUTO_CROP source=…`로
+어느 쪽이 쓰였는지 확인할 수 있고, `--no-pdf-auto-crop`으로 끌 수 있습니다.
 
 공통 기본값 (`kindle_app`에서 검증 후 전 프로필에 공유):
 

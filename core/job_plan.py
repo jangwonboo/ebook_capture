@@ -290,7 +290,7 @@ def plan_job(cfg: CaptureConfig) -> tuple[list[PlannedStep], CaptureConfig]:
 
 def confirm_steps(steps: list[PlannedStep], *, assume_yes: bool = False) -> bool:
     if not steps:
-        print("Nothing to do — outputs already exist (use --no-resume or --force-phase).")
+        print("Nothing to do - outputs already exist (use --no-resume or --force-phase).")
         return False
     if assume_yes:
         return True

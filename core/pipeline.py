@@ -1008,7 +1008,9 @@ def _run_phase_pdf(
             progress,
             f"PDF_AUTO_CROP source={outline.source} "
             f"solid_pages={outline.n_solid}/{outline.n_pages} "
-            f"outline=({l:.4f},{t:.4f},{r:.4f},{b:.4f}) trim={trim.as_dict()}",
+            f"outline=({l:.4f},{t:.4f},{r:.4f},{b:.4f}) "
+            f"chrome=(top {outline.chrome_top:.4f}, bottom {outline.chrome_bottom:.4f}) "
+            f"trim={trim.as_dict()}",
         )
         # Per-page PDFs built under a different crop must not be reused.
         crop_key = trim.as_dict()

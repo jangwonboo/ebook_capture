@@ -158,6 +158,70 @@ def test_page_outline_from_images_rdp_bars(tmp_path: Path) -> None:
     assert _close(o.as_tuple(), PAGE_R)
 
 
+def _toolbar(img: Image.Image, h: int = 20) -> Image.Image:
+    """Dark reader toolbar with a few 'icons', overlaid on the top margin."""
+    out = img.copy()
+    d = ImageDraw.Draw(out)
+    d.rectangle([0, 0, W - 1, h - 1], fill=(51, 51, 51))
+    for x in range(10, W, 25):
+        d.rectangle([x, 6, x + 8, 13], fill=(200, 200, 200))
+    return out
+
+
+def test_chrome_bands_find_toolbar_present_on_part_of_the_run() -> None:
+    from core.auto_crop import chrome_bands, page_bands
+
+    pages = [_text_page(60 + i, 240) for i in range(6)]  # white margins, no bar
+    pages += [_toolbar(_text_page(60 + i, 240)) for i in range(6)]  # 50% with bar
+    bands = [page_bands(p) for p in pages]
+    top, bottom = chrome_bands(bands)
+    assert abs(top - 20 / H) < 1e-6
+    assert bottom == 0.0
+
+
+def test_chrome_bands_ignore_blank_margins_and_rare_bars() -> None:
+    from core.auto_crop import chrome_bands, page_bands
+
+    plain = [page_bands(_text_page(60 + i, 240)) for i in range(8)]
+    assert chrome_bands(plain) == (0.0, 0.0)
+    # One page out of nine with a bar: below the 30% share -> not chrome.
+    rare = plain + [page_bands(_toolbar(_text_page()))]
+    assert chrome_bands(rare) == (0.0, 0.0)
+
+
+def test_chrome_bands_with_rdp_side_bars_need_outline_span() -> None:
+    """Black side bars make every full-width row non-uniform. Restricting the
+    rows to the page span keeps blank margins blank."""
+    from core.auto_crop import chrome_bands, page_bands
+
+    black = (0, 0, 0)
+    pages = [_text_page(60 + i, 240, bg=black) for i in range(6)]
+    pages += [_toolbar(_text_page(60 + i, 240, bg=black)) for i in range(6)]
+    span = (PAGE[0] / W, PAGE[2] / W)
+    top, bottom = chrome_bands([page_bands(p, span=span) for p in pages])
+    assert abs(top - 20 / H) < 1e-6 and bottom == 0.0
+    # Pages without any bar: nothing, even with the side bars present.
+    plain = [page_bands(p, span=span) for p in pages[:6]]
+    assert chrome_bands(plain) == (0.0, 0.0)
+
+
+def test_page_outline_folds_chrome_into_top(tmp_path: Path) -> None:
+    pages = [_full_bleed_page(), _full_bleed_page((40, 40, 60))]
+    pages += [_toolbar(_text_page(60 + i, 240)) for i in range(4)]
+    pages += [_text_page(70, 230)]
+    paths = []
+    for i, img in enumerate(pages):
+        p = tmp_path / f"p_{i:04d}.png"
+        img.save(p)
+        paths.append(p)
+    o = page_outline_from_images(paths)
+    assert o.source == "solid"
+    assert abs(o.chrome_top - 20 / H) < 1e-6 and o.chrome_bottom == 0.0
+    # Page outline top (10px) is inside the toolbar (20px): toolbar wins.
+    assert abs(o.top - 20 / H) < 1e-6
+    assert abs(o.left - 0.1) < 0.01 and abs(o.right - 0.9) < 0.01
+
+
 def test_outline_to_trim_keeps_fill_bands_and_clamps() -> None:
     o = PageOutline(
         left=0.1, top=0.05, right=0.9, bottom=0.98, source="solid", n_pages=3, n_solid=1

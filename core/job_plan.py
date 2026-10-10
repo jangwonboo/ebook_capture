@@ -260,6 +260,12 @@ def plan_job(cfg: CaptureConfig) -> tuple[list[PlannedStep], CaptureConfig]:
                     PlannedStep(StepKind.OCR_FROM_PNG, "OCR from PNG → tmp/*.ocr.json")
                 )
                 cfg.skip_capture = False
+            elif status["ocr_json"]:
+                # No capture source, but OCR JSON already exists → assemble from
+                # whatever is in tmp/ (may be a partial set). Matches the direct
+                # assemble_markdown path instead of failing the whole job.
+                print("NOTE: no capture source; assembling from existing tmp/*.ocr.json")
+                cfg.skip_capture = True
             else:
                 raise ValueError(
                     "No PNG or PDF source for text output. "

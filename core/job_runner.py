@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from core.assemble_markdown import assemble_markdown
 from core.assemble_options import AssembleOptions
 from core.config import OUTPUT_TEXT, CaptureConfig

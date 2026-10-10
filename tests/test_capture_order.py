@@ -21,11 +21,13 @@ def test_focus_clicks_run_before_each_capture(
     monkeypatch.setattr(
         pipeline, "_focus_reader_before_capture", lambda c, p: order.append("focus")
     )
-    monkeypatch.setattr(
-        pipeline,
-        "_capture_one_page",
-        lambda c, page, idx, n, p: order.append("capture") or object(),
-    )
+    def _fake_capture(c, page, idx, n, p):
+        order.append("capture")
+        # stop_repeat dedup hashes shot.tobytes(); give each page unique bytes so
+        # no false "end of book" early-stop while exercising the step order.
+        return type("_Shot", (), {"tobytes": lambda self, _n=len(order): bytes([_n])})()
+
+    monkeypatch.setattr(pipeline, "_capture_one_page", _fake_capture)
     monkeypatch.setattr(pipeline, "_save_image_atomic", lambda shot, path: None)
     monkeypatch.setattr(
         pipeline, "_mark_page", lambda *a, **k: None

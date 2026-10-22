@@ -54,6 +54,10 @@ KEY_DELIVERY_MODES = frozenset(
 
 PHASE_CAPTURE = "capture"
 PHASE_OCR = "ocr"
+OCR_ENGINE_GOOGLE = "google"
+OCR_ENGINE_DATALAB = "datalab"
+OCR_ENGINES = frozenset({OCR_ENGINE_GOOGLE, OCR_ENGINE_DATALAB})
+DATALAB_MODES = ("fast", "balanced", "accurate")
 PHASE_PDF = "pdf"
 PHASE_ALL = "all"
 FORCE_PHASES = {"", PHASE_CAPTURE, PHASE_OCR, PHASE_PDF, PHASE_ALL}
@@ -336,6 +340,14 @@ class CaptureConfig:
     ocr_lang: str = "eng"
     ocr_text_prompt: str = ""
     ocr_prompt_file: str = ""
+    # OCR backend for --text: "google" (Gemini, prompt-driven JSON) or
+    # "datalab" (hosted Marker; typed layout chunks, DATALAB_API_KEY).
+    ocr_engine: str = OCR_ENGINE_GOOGLE
+    # Datalab mode. "fast" scrapes the text layer and misses inline math.
+    datalab_mode: str = "accurate"
+    # Concurrent page requests during the OCR phase (1 = sequential). Datalab
+    # queues per request, so 4-8 workers cut wall time without extra cost.
+    ocr_workers: int = 1
     assemble_style: str = DEFAULT_ASSEMBLE_STYLE
     input_pdf: str = ""
     reader_profile: str = ""
@@ -361,6 +373,8 @@ class CaptureConfig:
         self.title = self.title.strip() or DEFAULT_BOOK_TITLE
         self.capture_mode = self.capture_mode.strip()
         self.assemble_style = self.assemble_style.strip().lower()
+        self.ocr_engine = self.ocr_engine.strip().lower() or OCR_ENGINE_GOOGLE
+        self.datalab_mode = self.datalab_mode.strip().lower() or "accurate"
         self.key_delivery = normalize_key_delivery(self.key_delivery)
         self.pdf_device = self.pdf_device.strip().lower()
         self.capture_scale = float(self.capture_scale)
@@ -466,6 +480,12 @@ class CaptureConfig:
             raise ValueError("start_page must be between 1 and 999999")
         if self.assemble_style not in {"full", "prose", "raw"}:
             raise ValueError("assemble_style must be one of: full, prose, raw")
+        if self.ocr_engine not in OCR_ENGINES:
+            raise ValueError("ocr_engine must be one of: google, datalab")
+        if self.datalab_mode not in DATALAB_MODES:
+            raise ValueError("datalab_mode must be one of: fast, balanced, accurate")
+        if self.ocr_workers < 1 or self.ocr_workers > 16:
+            raise ValueError("ocr_workers must be between 1 and 16")
         pdf_path = self.resolved_input_pdf()
         if self.uses_pdf_input():
             if pdf_path is None or not pdf_path.is_file():
@@ -610,6 +630,9 @@ class CaptureConfig:
             ocr_lang=str(data.get("ocr_lang", "eng")),
             ocr_text_prompt=str(data.get("ocr_text_prompt", "")),
             ocr_prompt_file=str(data.get("ocr_prompt_file", "")),
+            ocr_engine=str(data.get("ocr_engine", OCR_ENGINE_GOOGLE)),
+            datalab_mode=str(data.get("datalab_mode", "accurate")),
+            ocr_workers=int(data.get("ocr_workers", 1)),
             assemble_style=str(data.get("assemble_style", DEFAULT_ASSEMBLE_STYLE)),
             input_pdf=str(data.get("input_pdf", "")),
             reader_profile=str(data.get("reader_profile", "")),

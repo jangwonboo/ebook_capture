@@ -6,7 +6,13 @@ import re
 
 from core.ocr_json_loader import SectionBlock
 
-CHAPTER_NUM_RE = re.compile(r"^\d+\s*장$")
+# A chapter *label* on its own line: "2장", "제2장", "Chapter 2", "PART 1", "2부".
+# Labels followed by a title on the same line ("Chapter 9 • 제안") are TOC
+# entries, not chapter starts, and deliberately do not match.
+CHAPTER_NUM_RE = re.compile(
+    r"^(?:제\s*)?\d+\s*장$|^chapter\s+\d+$|^part\s+\d+$|^\d+\s*부$",
+    re.IGNORECASE,
+)
 SECTION_NUM_RE = re.compile(r"^\d{1,2}\.?$")
 BACKMATTER_HEADINGS = frozenset(
     {
@@ -14,9 +20,25 @@ BACKMATTER_HEADINGS = frozenset(
         "부록",
         "참고문헌",
         "에필로그",
+        "주",
+        "미주",
+        "후주",
+        "감사의 글",
+        "감사의 말",
+        "옮긴이의 글",
+        "옮긴이의 말",
+        "역자 후기",
+        "찾아보기",
+        "색인",
         "appendix",
         "references",
+        "bibliography",
         "epilogue",
+        "notes",
+        "endnotes",
+        "acknowledgments",
+        "acknowledgements",
+        "index",
     }
 )
 SKIP_ASSEMBLY_TYPES = frozenset({"header", "page_number"})
@@ -31,7 +53,36 @@ def chapter_marker_in_text(text: str) -> bool:
 
 
 def has_chapter_marker(titles: list[str]) -> bool:
-    return any(chapter_marker_in_text(t) for t in titles)
+    """Exactly one label among the leading titles. Two or more is a TOC page."""
+    return sum(1 for t in titles if chapter_marker_in_text(t)) == 1
+
+
+def promote_chapter_label_header(sections: list[SectionBlock]) -> list[SectionBlock]:
+    """Layout OCR (Datalab) tags the small "Chapter N" label above a chapter
+    opening as a page header. When such a header leads the page and a heading
+    follows, treat both as chapter titles so the usual ``N장`` rule applies."""
+    if not sections:
+        return sections
+    first = sections[0]
+    # Back-matter opener tagged as a header ("주", "감사의 글", "참고문헌").
+    if first.type in {"header", "page_number"} and is_backmatter_heading(first.text):
+        return [SectionBlock(type="title", text=first_line(first.text))] + list(sections[1:])
+    if len(sections) < 2:
+        return sections
+    second = sections[1]
+    if first.type not in {"header", "page_number", "title"}:
+        return sections
+    if not chapter_marker_in_text(first.text):
+        return sections
+    if second.type not in {"title", "section_title", "subtitle"}:
+        return sections
+    if first.type == "title" and second.type == "title":
+        return sections  # already the plain ``N장`` + title form
+    promoted = [
+        SectionBlock(type="title", text=first_line(first.text)),
+        SectionBlock(type="title", text=second.text),
+    ]
+    return promoted + list(sections[2:])
 
 
 def is_backmatter_heading(text: str) -> bool:

@@ -50,8 +50,16 @@ _SENTENCE_ENDINGS = (
 )
 
 
+_TRAILING_FOOTNOTE_RE = re.compile(r"(?:\s*\^[^^\s]{1,6}\^)+\s*$")
+
+# Within one page, a body block this short with no sentence ending is a
+# label / TOC line / caption fragment, not the tail of a wrapped paragraph.
+_MIN_MERGE_PREV_CHARS = 40
+
+
 def paragraph_ends(text: str) -> bool:
-    stripped = text.rstrip()
+    # Footnote markers (``보았다.^6^``) sit after the period; ignore them.
+    stripped = _TRAILING_FOOTNOTE_RE.sub("", text.rstrip()).rstrip()
     if not stripped:
         return True
     for ending in _SENTENCE_ENDINGS:
@@ -97,12 +105,30 @@ def looks_like_continuation(text: str) -> bool:
     return False
 
 
+def _both_short(prev: SectionBlock, nxt: SectionBlock) -> bool:
+    """Two short lines are list / TOC entries, not one paragraph split in two,
+    unless the first one ends mid-phrase (particle, comma, ``밖에`` ...) —
+    a real page break ("고작 1억분의 1의 계산밖에" | "하지 못하는 수준이다")
+    leaves such a dangling tail, a TOC line ("위계의 장점") does not."""
+    from core.text_reflow import _ends_with_space_joiner
+
+    if len(prev.text.strip()) >= _MIN_MERGE_PREV_CHARS:
+        return False
+    if len(nxt.text.strip()) >= _MIN_MERGE_PREV_CHARS:
+        return False
+    if looks_like_continuation(nxt.text):
+        return False
+    return not _ends_with_space_joiner(prev.text)
+
+
 def _should_merge_bodies(prev: SectionBlock, nxt: SectionBlock) -> bool:
     if prev.type != "body" or nxt.type != "body":
         return False
     if paragraph_ends(prev.text):
         return False
     if looks_like_new_paragraph(nxt.text):
+        return False
+    if _both_short(prev, nxt):
         return False
     return True
 

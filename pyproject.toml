@@ -17,6 +17,7 @@ dependencies = [
   "pygetwindow>=0.0.9",
   "Pillow>=9.0",
   "google-genai>=1.0",
+  "httpx>=0.24",
   "python-dotenv>=1.0",
   "certifi>=2024.0",
   "truststore>=0.10",

@@ -13,7 +13,7 @@ class AssembleStyle(str, Enum):
 
 
 _STYLE_DEFAULTS: dict[AssembleStyle, tuple[bool, bool, bool]] = {
-    AssembleStyle.FULL: (True, False, True),
+    AssembleStyle.FULL: (True, False, False),
     AssembleStyle.PROSE: (True, True, False),
     AssembleStyle.RAW: (False, False, True),
 }

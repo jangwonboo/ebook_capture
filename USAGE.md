@@ -68,7 +68,24 @@ python -m ebook_capture run --config default_config.jsonc --text --style full -y
 
 # 외부 PDF → text
 python -m ebook_capture run --title Book --base-dir E:\ebook --text --input-pdf E:\in\book.pdf -y
+
+# PDF → Datalab OCR → Markdown (Gemini 대신 Datalab, 6페이지 동시 요청)
+python -m ebook_capture run --title Book --base-dir E:\ebook --text --input-pdf E:\in\book.pdf --ocr-engine datalab --ocr-workers 6 -y
 ```
+
+### PDF → OCR → Markdown (Datalab)
+
+`--ocr-engine datalab`은 [Datalab](https://www.datalab.to)(호스팅 Marker)에 페이지를 보내 **유형이 붙은 레이아웃 블록**(SectionHeader / Text / Caption / Footnote / Table / Equation / PageHeader …)을 받고, 그것을 `tmp/*.ocr.json`의 section 타입(`title` / `section_title` / `body` / `caption` / `footnote` / `table` / `equation` / `header` / `page_number`)으로 바로 대응시킵니다. 프롬프트가 없으므로 `--ocr-prompt*`와 `--ocr-lang`은 무시됩니다. 그 뒤의 장·단락 조립(`{title}.md`)은 Gemini 경로와 같습니다.
+
+- 입력은 `tmp/*.png`(캡처 결과) 또는 `--input-pdf`(한 쪽씩 잘라 PDF 그대로 전송). 둘 다 쪽당 1건 요청이며 실측 accurate 모드 약 1센트/쪽, 쪽당 10초 안팎.
+- `--ocr-workers N`(1-16): 동시 요청 수. Datalab은 요청마다 큐에 서므로 4-8이면 벽시계 시간이 그만큼 줄고 비용은 같습니다. 429/연결 끊김은 Retry-After로 물러나 재시도합니다.
+- 실패한 쪽은 `OCR_PAGE_FAIL`로 남기고 나머지를 계속합니다. 끝에 `OCR_FAIL n page(s)`가 찍히면 같은 명령을 다시 실행하면 빠진 쪽만 채웁니다(완료된 쪽은 `OCR_SKIP`).
+- `OCR_COST datalab pages=N usd=X`: 응답의 `cost_breakdown.final_cost_cents` 합계(단위 센트 → 달러).
+- `--datalab-mode fast|balanced|accurate`(기본 accurate). `fast`는 PDF 텍스트 레이어를 긁어 인라인 수식을 놓칩니다.
+- Picture/Figure 블록의 글(모델이 지어낸 그림 설명)은 버립니다. 표는 HTML 그대로 `table` 섹션, 수식은 `$…$` / `$$…$$`로 남습니다. `blocks_raw`(유형+HTML+bbox)가 각 `.ocr.json`에 같이 저장됩니다.
+- 제목 등급은 Marker의 h1/h2가 아니라 **블록 위치**로 정합니다(리플로우 리더는 번호 목록·인용·미주를 큰 글자로 그려서 글자 크기가 단락 성격과 맞지 않습니다). 가운데 정렬 → `section_title`(###), 왼쪽 정렬 → `subtitle`(####), 본문 폭 전체(80% 이상)나 `1. …` 번호 항목 → `body`, 그림 바로 아래 → `caption`, 장 라벨(`Chapter N`, `PART N`, `N장`) → `title`, 숫자만/장식 기호만 → 버림. 장 머리의 작은 "Chapter N" 라벨은 PageHeader로 오는데 조립 단계가 이를 장 시작으로 씁니다.
+- 본문 정리: 각주 참조 번호(`<sup>`)는 버리고, `<li>` 안에 반복된 글머리(`• 항목`)는 하나만 남기며, `1. 항목`/`1 항목` 꼴 항목은 번호 목록으로 냅니다(미주처럼 번호와 글이 다른 `<div>`로 갈라진 항목도 붙임). `full` 스타일은 이제 `<!-- pages: a-b -->` 주석을 넣지 않습니다(`AssembleOptions(page_comments=True)`로 켤 수 있음).
+- 분류 규칙만 바뀌었을 때는 재OCR 없이 `core.datalab_ocr.rebuild_page_structure()`로 기존 `.ocr.json`의 `blocks_raw`에서 섹션을 다시 만들 수 있습니다(과금 0).
 
 필요한 중간 파일이 없으면 **실행할 단계 목록**을 보여 주고 `Proceed? [Y/n]`으로 묻습니다.  
 스크립트·GUI는 `-y` / `--yes`로 건너뜁니다.
@@ -98,6 +115,7 @@ python -m ebook_capture run --title Book --base-dir E:\ebook --text --input-pdf 
 | `pdf_auto_crop` | true | 고정 `pdf_trim` 대신 캡처 완료 후 페이지 공통 윤곽을 뽑아 crop (아래 참고) |
 | `prevent_sleep` | true (config 기본) | 캡처 중 화면 보호기·디스플레이 끄기 차단 (`SetThreadExecutionState`) |
 | `--sub-left/--sub-top/--sub-width/--sub-height` (`window_subrect`) | 책마다 | 창 client 영역 중 리더 페이지 부분만 캡처. 원격 세션이 전체 화면(3840x2160)이고 리더가 일부만 차지할 때 사용. 좌표는 `inspect --screenshot`의 probe 기준(물리 픽셀, run과 동일 DPI 모드). width/height 0 = 끝까지. 2026-10-22 검증: 4K 세션 리더 `--sub-left 2 --sub-top 81 --sub-width 1277 --sub-height 1975` |
+| `--pdf-auto-crop-margin` (`pdf_auto_crop_margin`) | 0.0 | 감지한 윤곽을 사방으로 이 비율만큼 넓힘. 본문이 윤곽 끝까지 꽉 차는 리플로우 책(권력중독: 글자 끝 = 크롭선)은 0.005 정도를 주면 안티앨리어싱이 안 잘림 |
 | `stop_repeat_tolerance` | 0.3 (config 기본) | 회색 썸네일 평균 차이가 이 값 이하면 같은 페이지로 봄. 리더 오버레이(화살표 등)는 ~0.003, 실제 넘김은 4 이상. 책 끝 감지와 키 재전송 판단에 공통 사용. 0.0 = 완전 일치 |
 
 `pdf_auto_crop`은 각 PNG의 바깥 테두리를 단계적으로 벗겨 가며 "채워진 상자"(검은 RDP 바에 대비되는 흰 페이지,
@@ -214,7 +232,10 @@ python -m ebook_capture run --config default_config.jsonc --reader kindle_app --
 
 | 옵션 | 설명 |
 |------|------|
-| `--ocr-lang` | 예: `kor`, `eng` |
+| `--ocr-engine google\|datalab` | OCR 백엔드 (기본 google = Gemini) |
+| `--datalab-mode fast\|balanced\|accurate` | Datalab 정확도 (기본 accurate) |
+| `--ocr-workers N` | OCR 동시 요청 수 (1-16, 기본 1) |
+| `--ocr-lang` | 예: `kor`, `eng` (Gemini만) |
 | `--ocr-prompt` / `--ocr-prompt-file` | Gemini 프롬프트 |
 | `--resume` / `--no-resume` | 완료 페이지 건너뛰기 |
 | `--force-phase capture\|ocr\|pdf\|all` | 해당 단계 강제 재실행 |
@@ -307,7 +328,9 @@ GOOGLE_API_TRUST_MODE=auto
 | `system` | 사내망 / Windows 인증서 |
 | `certifi` | 일반 인터넷 |
 
-추가 CA: `GOOGLE_API_CA_BUNDLE=회사루트.cer`
+추가 CA: `GOOGLE_API_CA_BUNDLE=회사루트.cer` (Datalab 호출도 같은 CA 설정을 씁니다)
+
+Datalab(`--ocr-engine datalab`): `DATALAB_API_KEY=...` (https://www.datalab.to 발급, 선불 크레딧). 환경변수 → `.env` 순으로 찾고 자리표시자 `your-datalab-api-key-here`는 없는 것으로 봅니다.
 
 OCR(`--text`)을 쓸 때만 필요합니다. `--images` / `--pdf`만이면 API 키 없이 동작합니다.
 

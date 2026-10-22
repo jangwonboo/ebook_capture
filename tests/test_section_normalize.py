@@ -24,6 +24,56 @@ def test_section_number_plus_title_becomes_section_title() -> None:
     assert prepared[2].type == "body"
 
 
+def test_chapter_label_header_promotes_to_chapter_start() -> None:
+    from core.section_normalize import promote_chapter_label_header
+
+    raw = [
+        SectionBlock(type="header", text="Chapter 2"),
+        SectionBlock(type="title", text="권력은\n어디에서 오는가"),
+        SectionBlock(type="body", text="본문"),
+    ]
+    promoted = promote_chapter_label_header(raw)
+    assert [s.type for s in promoted] == ["title", "title", "body"]
+    assert is_chapter_start_page(promoted)
+    # A plain running header is left alone.
+    plain = [SectionBlock(type="header", text="권력중독"), SectionBlock(type="title", text="x")]
+    assert promote_chapter_label_header(plain) == plain
+
+
+def test_backmatter_header_promotes_and_repeats_do_not_split() -> None:
+    from core.book_structure import build_book_structure
+    from core.ocr_json_loader import PageRecord
+    from core.section_normalize import promote_chapter_label_header
+
+    raw = [SectionBlock(type="header", text="주"), SectionBlock(type="subtitle", text="서문"),
+           SectionBlock(type="body", text="1 철학적 관점")]
+    promoted = promote_chapter_label_header(raw)
+    assert promoted[0].type == "title" and is_backmatter_start_page(promoted)
+    pages = [
+        PageRecord(1, [SectionBlock("title", "1장"), SectionBlock("title", "시작"), SectionBlock("body", "본문.")]),
+        PageRecord(2, [SectionBlock("header", "참고문헌"), SectionBlock("body", "A (2020).")]),
+        PageRecord(3, [SectionBlock("header", "참고문헌"), SectionBlock("body", "B (2021).")]),
+    ]
+    structure = build_book_structure("책", pages)
+    assert [(c.kind, c.start_page, c.end_page) for c in structure.chapters] == [
+        ("chapter", 1, 1), ("back_matter", 2, 3)]
+    # The chapter title is not repeated as a section heading inside the chapter.
+    assert [b.text for b in structure.chapters[0].blocks] == ["본문."]
+
+
+def test_toc_page_with_many_labels_is_not_chapter_start() -> None:
+    raw = [
+        SectionBlock(type="title", text="1장"),
+        SectionBlock(type="title", text="2장"),
+        SectionBlock(type="body", text="목차"),
+    ]
+    assert not is_chapter_start_page(raw)
+    raw2 = [SectionBlock(type="title", text="Chapter 9 • 사회를 위한 제안")]
+    assert not is_chapter_start_page(raw2)
+    raw3 = [SectionBlock(type="title", text="PART 1"), SectionBlock(type="title", text="우리는 왜")]
+    assert is_chapter_start_page(raw3)
+
+
 def test_chapter_page_only_n_jang() -> None:
     raw = [
         SectionBlock(type="title", text="2장"),

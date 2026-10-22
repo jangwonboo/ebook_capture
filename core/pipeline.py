@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -892,97 +893,163 @@ def _collect_combined_ocr_parts(cfg: CaptureConfig) -> list[str]:
     return [block for _, block in parts]
 
 
+def _ocr_page_runner(cfg: CaptureConfig, pdf_path: Path | None):
+    """Return (engine label, fn(page_num) -> structure, spend-or-None)."""
+    from core.config import OCR_ENGINE_DATALAB
+
+    if cfg.ocr_engine == OCR_ENGINE_DATALAB:
+        from core import datalab_ocr
+
+        spend = datalab_ocr.Spend()
+        label = f"Datalab {cfg.datalab_mode}"
+
+        def run(page_num: int) -> dict[str, Any]:
+            if pdf_path is not None:
+                return datalab_ocr.extract_page_structure_from_pdf_page(
+                    pdf_path,
+                    cfg.pdf_page_index(page_num),
+                    page_num=page_num,
+                    mode=cfg.datalab_mode,
+                    spend=spend,
+                )
+            return datalab_ocr.extract_page_structure_from_image(
+                cfg.page_png_path(page_num),
+                page_num=page_num,
+                mode=cfg.datalab_mode,
+                spend=spend,
+            )
+
+        return label, run, spend
+
+    from core.google_ocr import (
+        extract_page_structure_from_image,
+        extract_page_structure_from_pdf_page,
+    )
+
+    def run_google(page_num: int) -> dict[str, Any]:
+        if pdf_path is not None:
+            return extract_page_structure_from_pdf_page(
+                pdf_path,
+                cfg.pdf_page_index(page_num),
+                page_num=page_num,
+                lang_hint=cfg.ocr_lang,
+                prompt=cfg.ocr_text_prompt,
+                prompt_file=cfg.resolved_ocr_prompt_file(),
+            )
+        return extract_page_structure_from_image(
+            cfg.page_png_path(page_num),
+            page_num=page_num,
+            lang_hint=cfg.ocr_lang,
+            prompt=cfg.ocr_text_prompt,
+            prompt_file=cfg.resolved_ocr_prompt_file(),
+        )
+
+    return "Google Gemini", run_google, None
+
+
 def _run_phase_ocr(
     cfg: CaptureConfig,
     state: dict[str, Any],
     n_run: int,
     progress: ProgressFn | None,
 ) -> int:
-    from core.google_ocr import (
-        extract_page_structure_from_image,
-        extract_page_structure_from_pdf_page,
-        page_structure_to_text,
-    )
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from core.google_ocr import page_structure_to_text
 
     pdf_path = cfg.resolved_input_pdf()
-    if pdf_path is not None and pdf_path.is_file():
-        _emit(progress, "Phase II: PDF -> structured OCR JSON + TXT (Google Gemini)")
-    else:
-        _emit(progress, "Phase II: PNG -> structured OCR JSON + TXT (Google Gemini)")
-    try:
-        for page_num in cfg.page_numbers(n_run):
-            txt_path = cfg.page_txt_path(page_num)
-            json_path = cfg.page_ocr_json_path(page_num)
-            if pdf_path is not None and pdf_path.is_file():
-                pdf_index = cfg.pdf_page_index(page_num)
-                if _can_skip_page(
-                    cfg,
-                    state,
-                    PHASE_OCR,
-                    page_num,
-                    lambda t=txt_path, j=json_path: _valid_text(t) and _valid_ocr_json(j),
-                ):
-                    _emit(progress, f"OCR_SKIP page#{page_num} {txt_path}")
-                    continue
-                try:
-                    _emit(
-                        progress,
-                        f"OCR_PDF_PAGE pdf_page={page_num} pdf_index={pdf_index}",
-                    )
-                    structure = extract_page_structure_from_pdf_page(
-                        pdf_path,
-                        pdf_index,
-                        page_num=page_num,
-                        lang_hint=cfg.ocr_lang,
-                        prompt=cfg.ocr_text_prompt,
-                        prompt_file=cfg.resolved_ocr_prompt_file(),
-                    )
-                except ValueError as exc:
-                    _mark_page(cfg, state, PHASE_OCR, page_num, "failed", json_path, str(exc))
-                    raise RuntimeError(str(exc)) from exc
-            else:
-                png = cfg.page_png_path(page_num)
-                if not _valid_png(png):
-                    _emit(progress, f"OCR_MISSING_IMAGE page#{page_num} {png}")
-                    return 3
-                if _can_skip_page(
-                    cfg,
-                    state,
-                    PHASE_OCR,
-                    page_num,
-                    lambda t=txt_path, j=json_path: _valid_text(t) and _valid_ocr_json(j),
-                ):
-                    _emit(progress, f"OCR_SKIP page#{page_num} {txt_path}")
-                    continue
-                structure = extract_page_structure_from_image(
-                    png,
-                    page_num=page_num,
-                    lang_hint=cfg.ocr_lang,
-                    prompt=cfg.ocr_text_prompt,
-                    prompt_file=cfg.resolved_ocr_prompt_file(),
-                )
+    if pdf_path is None or not pdf_path.is_file():
+        pdf_path = None
+    engine_label, run_page, spend = _ocr_page_runner(cfg, pdf_path)
+    source = "PDF" if pdf_path is not None else "PNG"
+    _emit(progress, f"Phase II: {source} -> structured OCR JSON + TXT ({engine_label})")
+
+    pending: list[int] = []
+    for page_num in cfg.page_numbers(n_run):
+        txt_path = cfg.page_txt_path(page_num)
+        json_path = cfg.page_ocr_json_path(page_num)
+        if pdf_path is None:
+            png = cfg.page_png_path(page_num)
+            if not _valid_png(png):
+                _emit(progress, f"OCR_MISSING_IMAGE page#{page_num} {png}")
+                return 3
+        if _can_skip_page(
+            cfg,
+            state,
+            PHASE_OCR,
+            page_num,
+            lambda t=txt_path, j=json_path: _valid_text(t) and _valid_ocr_json(j),
+        ):
+            _emit(progress, f"OCR_SKIP page#{page_num} {txt_path}")
+            continue
+        pending.append(page_num)
+
+    state_lock = threading.Lock()
+    failures: list[tuple[int, str]] = []
+
+    def finish(page_num: int, structure: dict[str, Any]) -> None:
+        txt_path = cfg.page_txt_path(page_num)
+        json_path = cfg.page_ocr_json_path(page_num)
+        text = page_structure_to_text(structure)
+        _atomic_write_text(txt_path, text)
+        _atomic_write_json(json_path, structure)
+        with state_lock:
+            _mark_page(cfg, state, PHASE_OCR, page_num, "done", json_path)
+        if text:
+            _emit(progress, f"OCR_TEXT_OK page#{page_num} {txt_path}")
+            _emit(progress, f"OCR_JSON_OK page#{page_num} {json_path}")
+        else:
+            _emit(progress, f"OCR_EMPTY page#{page_num} (no visible text) {json_path}")
+
+    def fail(page_num: int, exc: BaseException) -> None:
+        json_path = cfg.page_ocr_json_path(page_num)
+        with state_lock:
+            _mark_page(cfg, state, PHASE_OCR, page_num, "failed", json_path, str(exc))
+        failures.append((page_num, str(exc)))
+        _emit(progress, f"OCR_PAGE_FAIL page#{page_num} {exc}")
+
+    workers = max(1, int(cfg.ocr_workers))
+    if pdf_path is not None:
+        for page_num in pending:
+            _emit(
+                progress,
+                f"OCR_PDF_PAGE pdf_page={page_num} pdf_index={cfg.pdf_page_index(page_num)}",
+            )
+    if workers == 1 or len(pending) <= 1:
+        for page_num in pending:
             try:
-                text = page_structure_to_text(structure)
-                _atomic_write_text(txt_path, text)
-                _atomic_write_json(json_path, structure)
-                _mark_page(cfg, state, PHASE_OCR, page_num, "done", json_path)
-                if text:
-                    _emit(progress, f"OCR_TEXT_OK page#{page_num} {txt_path}")
-                    _emit(progress, f"OCR_JSON_OK page#{page_num} {json_path}")
-                else:
-                    _emit(progress, f"OCR_EMPTY page#{page_num} (no visible text) {json_path}")
-            except RuntimeError as exc:
-                _mark_page(cfg, state, PHASE_OCR, page_num, "failed", json_path, str(exc))
-                raise
-        _atomic_write_text(
-            cfg.final_ocr_text_path(),
-            "\n\n".join(_collect_combined_ocr_parts(cfg)),
-        )
-        _emit(progress, f"OCR_OK {cfg.final_ocr_text_path()}")
-        return 0
-    except RuntimeError as exc:
-        _emit(progress, f"OCR_FAIL {exc}")
+                finish(page_num, run_page(page_num))
+            except (RuntimeError, ValueError) as exc:
+                fail(page_num, exc)
+                if cfg.ocr_engine != "datalab":
+                    break  # Gemini failures are usually global (key, quota)
+    else:
+        _emit(progress, f"OCR_WORKERS {workers} pages={len(pending)}")
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(run_page, p): p for p in pending}
+            for fut in as_completed(futures):
+                page_num = futures[fut]
+                try:
+                    finish(page_num, fut.result())
+                except (RuntimeError, ValueError) as exc:
+                    fail(page_num, exc)
+
+    if spend is not None and spend.pages:
+        _emit(progress, f"OCR_COST {cfg.ocr_engine} {spend.summary()}")
+    if failures:
+        failures.sort()
+        shown = ", ".join(str(p) for p, _ in failures[:12])
+        more = " ..." if len(failures) > 12 else ""
+        _emit(progress, f"OCR_FAIL {len(failures)} page(s): {shown}{more}")
+        _emit(progress, f"OCR_FAIL first error: {failures[0][1]}")
+        _emit(progress, "OCR_FAIL rerun with --text to resume the missing pages")
         return 3
+    _atomic_write_text(
+        cfg.final_ocr_text_path(),
+        "\n\n".join(_collect_combined_ocr_parts(cfg)),
+    )
+    _emit(progress, f"OCR_OK {cfg.final_ocr_text_path()}")
+    return 0
 
 
 def _run_phase_pdf(

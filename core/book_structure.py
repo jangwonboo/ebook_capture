@@ -15,6 +15,7 @@ from core.section_normalize import (
     is_chapter_start_page,
     leading_titles,
     prepare_page_sections,
+    promote_chapter_label_header,
 )
 
 CHAPTER_KIND = "chapter"
@@ -58,9 +59,15 @@ def slugify(text: str) -> str:
     return slug or "section"
 
 
-def _content_after_chapter_headings(sections: list[SectionBlock]) -> list[SectionBlock]:
-    _, rest = leading_titles(sections)
-    return rest
+def _content_after_chapter_headings(
+    sections: list[SectionBlock], n_titles: int
+) -> list[SectionBlock]:
+    """Drop the chapter label + title already used for the chapter heading.
+
+    ``prepare_page_sections`` turns the title into a ``section_title``, so
+    counting leading ``title`` blocks again would keep it and the chapter
+    heading would be printed twice."""
+    return sections[max(0, n_titles):]
 
 
 def _content_after_backmatter_heading(sections: list[SectionBlock]) -> list[SectionBlock]:
@@ -110,7 +117,7 @@ def build_book_structure(title: str, pages: list[PageRecord]) -> BookStructure:
     front_matter_inserted = False
 
     for page in pages:
-        raw_sections = page.sections
+        raw_sections = promote_chapter_label_header(page.sections)
         prepared = prepare_page_sections(raw_sections)
         if not prepared:
             continue
@@ -118,6 +125,13 @@ def build_book_structure(title: str, pages: list[PageRecord]) -> BookStructure:
         if is_chapter_start_page(raw_sections):
             titles, _ = leading_titles(raw_sections)
             heading = combine_chapter_titles(titles)
+            if current is not None and heading == current.heading:
+                # Same label repeated (running header): continue the chapter.
+                current.end_page = page.page_num
+                _append_prepared_blocks(
+                    current, page.page_num, _content_after_chapter_headings(prepared, len(titles))
+                )
+                continue
             if current is not None:
                 _flush_chapter(chapters, current, page.page_num - 1)
             elif front_matter.blocks and not front_matter_inserted:
@@ -134,11 +148,18 @@ def build_book_structure(title: str, pages: list[PageRecord]) -> BookStructure:
             _append_prepared_blocks(
                 current,
                 page.page_num,
-                _content_after_chapter_headings(prepared),
+                _content_after_chapter_headings(prepared, len(titles)),
             )
             continue
 
         if is_backmatter_start_page(raw_sections):
+            heading = backmatter_heading_from_page(raw_sections)
+            if current is not None and heading == current.heading:
+                current.end_page = page.page_num
+                _append_prepared_blocks(
+                    current, page.page_num, _content_after_backmatter_heading(prepared)
+                )
+                continue
             if current is not None:
                 _flush_chapter(chapters, current, page.page_num - 1)
                 current = None
@@ -146,7 +167,6 @@ def build_book_structure(title: str, pages: list[PageRecord]) -> BookStructure:
                 front_matter.end_page = page.page_num - 1
                 chapters.append(front_matter)
                 front_matter_inserted = True
-            heading = backmatter_heading_from_page(raw_sections)
             current = ChapterDoc(
                 heading=heading,
                 slug=slugify(heading),

@@ -91,6 +91,28 @@ def _add_run_options(parser: argparse.ArgumentParser) -> None:
         help="Markdown style for --text (default: assemble_style in config).",
     )
     parser.add_argument("--ocr-lang", dest="ocr_lang", default=argparse.SUPPRESS)
+    parser.add_argument(
+        "--ocr-engine",
+        dest="ocr_engine",
+        choices=["google", "datalab"],
+        default=argparse.SUPPRESS,
+        help="OCR backend for --text: google (Gemini) or datalab (hosted Marker).",
+    )
+    parser.add_argument(
+        "--datalab-mode",
+        dest="datalab_mode",
+        choices=["fast", "balanced", "accurate"],
+        default=argparse.SUPPRESS,
+        help="Datalab accuracy mode (default accurate; fast misses inline math).",
+    )
+    parser.add_argument(
+        "--ocr-workers",
+        dest="ocr_workers",
+        type=int,
+        default=argparse.SUPPRESS,
+        metavar="N",
+        help="Concurrent page requests in the OCR phase (1-16, default 1).",
+    )
     parser.add_argument("--ocr-prompt", dest="ocr_text_prompt", default=argparse.SUPPRESS)
     parser.add_argument(
         "--ocr-prompt-file",
@@ -113,6 +135,14 @@ def _add_run_options(parser: argparse.ArgumentParser) -> None:
         action="store_false",
         default=argparse.SUPPRESS,
         help="Use pdf_trim ratios only (overrides a profile's pdf_auto_crop).",
+    )
+    parser.add_argument(
+        "--pdf-auto-crop-margin",
+        dest="pdf_auto_crop_margin",
+        type=float,
+        default=argparse.SUPPRESS,
+        metavar="RATIO",
+        help="Grow the detected outline by this fraction of width/height on each side (0-0.2).",
     )
     parser.add_argument(
         "--force-phase",
@@ -347,12 +377,20 @@ def _apply_args(cfg: CaptureConfig, args: argparse.Namespace) -> CaptureConfig:
         cfg.ocr_text_prompt = str(args.ocr_text_prompt or "")
     if hasattr(args, "ocr_prompt_file"):
         cfg.ocr_prompt_file = str(args.ocr_prompt_file or "")
+    if hasattr(args, "ocr_engine"):
+        cfg.ocr_engine = str(args.ocr_engine)
+    if hasattr(args, "datalab_mode"):
+        cfg.datalab_mode = str(args.datalab_mode)
+    if hasattr(args, "ocr_workers"):
+        cfg.ocr_workers = int(args.ocr_workers)
     if hasattr(args, "resume"):
         cfg.resume = bool(args.resume)
     if hasattr(args, "force_phase"):
         cfg.force_phase = str(args.force_phase)
     if hasattr(args, "pdf_auto_crop"):
         cfg.pdf_auto_crop = bool(args.pdf_auto_crop)
+    if hasattr(args, "pdf_auto_crop_margin"):
+        cfg.pdf_auto_crop_margin = float(args.pdf_auto_crop_margin)
     if getattr(args, "window_frame", False):
         cfg.use_window_client_rect = False
     if getattr(args, "window_match_first", False):

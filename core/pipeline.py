@@ -40,12 +40,14 @@ def _resolve_capture_region(cfg: CaptureConfig) -> tuple[int, int, int, int]:
         return cfg.rect.as_tuple()
     from core import windows_util as wu
 
-    return wu.resolve_screen_rect(
-        cfg.target_window_title,
-        cfg.capture_mode,
-        use_client_rect=cfg.use_window_client_rect,
-        prefer_foreground=cfg.prefer_foreground_window_match,
-        pinned_hwnd=cfg.pinned_target_hwnd,
+    return cfg.apply_window_subrect(
+        wu.resolve_screen_rect(
+            cfg.target_window_title,
+            cfg.capture_mode,
+            use_client_rect=cfg.use_window_client_rect,
+            prefer_foreground=cfg.prefer_foreground_window_match,
+            pinned_hwnd=cfg.pinned_target_hwnd,
+        )
     )
 
 
@@ -683,9 +685,11 @@ def _pin_capture_target(cfg: CaptureConfig, progress: ProgressFn | None) -> None
 
     if is_fixed_screen_capture_mode(cfg.capture_mode) and cfg.pinned_target_hwnd > 0:
         # Pin the client (or frame) rect of the current reader window layout.
-        live = wu.capture_rect_screen_left_third(
-            cfg.pinned_target_hwnd,
-            use_client_rect=cfg.use_window_client_rect,
+        live = cfg.apply_window_subrect(
+            wu.capture_rect_screen_left_third(
+                cfg.pinned_target_hwnd,
+                use_client_rect=cfg.use_window_client_rect,
+            )
         )
     else:
         live = _resolve_capture_region(cfg)

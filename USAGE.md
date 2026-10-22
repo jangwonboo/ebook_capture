@@ -97,6 +97,7 @@ python -m ebook_capture run --title Book --base-dir E:\ebook --text --input-pdf 
 | `page_turn_retries` | 2 | 화면이 안 바뀌면(포커스 이탈로 키 유실) 재포그라운드 + 키 재전송 후 재촬영 |
 | `pdf_auto_crop` | true | 고정 `pdf_trim` 대신 캡처 완료 후 페이지 공통 윤곽을 뽑아 crop (아래 참고) |
 | `prevent_sleep` | true (config 기본) | 캡처 중 화면 보호기·디스플레이 끄기 차단 (`SetThreadExecutionState`) |
+| `--sub-left/--sub-top/--sub-width/--sub-height` (`window_subrect`) | 책마다 | 창 client 영역 중 리더 페이지 부분만 캡처. 원격 세션이 전체 화면(3840x2160)이고 리더가 일부만 차지할 때 사용. 좌표는 `inspect --screenshot`의 probe 기준(물리 픽셀, run과 동일 DPI 모드). width/height 0 = 끝까지. 2026-10-22 검증: 4K 세션 리더 `--sub-left 2 --sub-top 81 --sub-width 1277 --sub-height 1975` |
 | `stop_repeat_tolerance` | 0.3 (config 기본) | 회색 썸네일 평균 차이가 이 값 이하면 같은 페이지로 봄. 리더 오버레이(화살표 등)는 ~0.003, 실제 넘김은 4 이상. 책 끝 감지와 키 재전송 판단에 공통 사용. 0.0 = 완전 일치 |
 
 `pdf_auto_crop`은 각 PNG의 바깥 테두리를 단계적으로 벗겨 가며 "채워진 상자"(검은 RDP 바에 대비되는 흰 페이지,

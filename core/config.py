@@ -259,6 +259,11 @@ class CaptureConfig:
     start_page: int = 1
     base_dir: str = DEFAULT_BASE_DIR
     rect: Rect = field(default_factory=Rect)
+    # Window modes only: capture this sub-rectangle of the resolved window rect
+    # (pixels from the window's top-left; width/height 0 = to the far edge).
+    # Lets a reader that fills only part of a large window (e.g. an app inside a
+    # full-screen RDP session) be captured without the rest of the desktop.
+    window_subrect: Rect = field(default_factory=Rect)
     capture_mode: str = CAPTURE_MANUAL
     target_window_title: str = ""
     use_window_client_rect: bool = True
@@ -336,6 +341,20 @@ class CaptureConfig:
     reader_profile: str = ""
     pinned_target_hwnd: int = 0
     pinned_capture_rect: tuple[int, int, int, int] | None = None
+
+    def apply_window_subrect(
+        self, rect: tuple[int, int, int, int]
+    ) -> tuple[int, int, int, int]:
+        """Clip ``rect`` (screen l,t,w,h) to ``window_subrect`` if one is set."""
+        sl, st, sw, sh = self.window_subrect.as_tuple()
+        if (sl, st, sw, sh) == (0, 0, 0, 0):
+            return rect
+        left, top, width, height = rect
+        sl = min(max(0, sl), max(0, width - 1))
+        st = min(max(0, st), max(0, height - 1))
+        w = width - sl if sw <= 0 else min(sw, width - sl)
+        h = height - st if sh <= 0 else min(sh, height - st)
+        return left + sl, top + st, max(1, w), max(1, h)
 
     def normalize(self) -> CaptureConfig:
         self.output_mode = normalize_output_mode(self.output_mode)
@@ -434,6 +453,8 @@ class CaptureConfig:
 
     def validate(self) -> None:
         self.normalize()
+        if min(self.window_subrect.as_tuple()) < 0:
+            raise ValueError("window_subrect values must be >= 0")
         if self.capture_mode not in CAPTURE_MODES:
             raise ValueError(
                 "capture_mode must be one of: manual, window_full, "
@@ -525,6 +546,7 @@ class CaptureConfig:
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> CaptureConfig:
         rect_raw = data.get("rect") or {}
+        sub_raw = data.get("window_subrect") or {}
         cfg = cls(
             title=str(data.get("title", DEFAULT_BOOK_TITLE)).strip()
             or DEFAULT_BOOK_TITLE,
@@ -536,6 +558,12 @@ class CaptureConfig:
                 top=int(rect_raw.get("top", 0)),
                 width=int(rect_raw.get("width", 0)),
                 height=int(rect_raw.get("height", 0)),
+            ),
+            window_subrect=Rect(
+                left=int(sub_raw.get("left", 0)),
+                top=int(sub_raw.get("top", 0)),
+                width=int(sub_raw.get("width", 0)),
+                height=int(sub_raw.get("height", 0)),
             ),
             capture_mode=str(data.get("capture_mode", CAPTURE_MANUAL)),
             target_window_title=str(data.get("target_window_title", "")),

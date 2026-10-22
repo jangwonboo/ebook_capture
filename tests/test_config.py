@@ -201,3 +201,28 @@ def test_capture_scale_config_and_clamp():
     assert h == 1800 and abs(f - 1800 / 5400) < 1e-6 and w == round(2880 * f)
     # fits -> no clamp
     assert clamp_size_keep_aspect(1200, 1600, 2880, 1800) == (1200, 1600, 1.0)
+
+
+def test_window_subrect_clips_resolved_rect() -> None:
+    from core.config import Rect
+
+    cfg = CaptureConfig()
+    full = (-545, -2160, 3840, 2160)
+    assert cfg.apply_window_subrect(full) == full  # unset = whole window
+    cfg.window_subrect = Rect(2, 81, 1277, 1975)
+    assert cfg.apply_window_subrect(full) == (-543, -2079, 1277, 1975)
+    # width/height 0 extend to the far edge; oversize values are clamped.
+    cfg.window_subrect = Rect(100, 50, 0, 0)
+    assert cfg.apply_window_subrect(full) == (-445, -2110, 3740, 2110)
+    cfg.window_subrect = Rect(100, 50, 99999, 99999)
+    assert cfg.apply_window_subrect(full) == (-445, -2110, 3740, 2110)
+
+
+def test_window_subrect_from_mapping_and_validate() -> None:
+    cfg = CaptureConfig.from_mapping(
+        {"title": "t", "window_subrect": {"left": 2, "top": 81, "width": 10, "height": 20}}
+    )
+    assert cfg.window_subrect.as_tuple() == (2, 81, 10, 20)
+    cfg.window_subrect.left = -1
+    with pytest.raises(ValueError):
+        cfg.validate()

@@ -183,6 +183,12 @@ def _add_capture_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--top", type=int, default=None)
     parser.add_argument("--width", type=int, default=None)
     parser.add_argument("--height", type=int, default=None)
+    # Window modes: capture only this sub-rectangle of the window (pixels from
+    # the window's top-left; width/height 0 = to the far edge).
+    parser.add_argument("--sub-left", dest="sub_left", type=int, default=None)
+    parser.add_argument("--sub-top", dest="sub_top", type=int, default=None)
+    parser.add_argument("--sub-width", dest="sub_width", type=int, default=None)
+    parser.add_argument("--sub-height", dest="sub_height", type=int, default=None)
     parser.add_argument("--delay", type=float, dest="delay_sec", default=None)
     parser.add_argument("--next-key", dest="next_key", default=None)
     parser.add_argument(
@@ -332,6 +338,9 @@ def _apply_args(cfg: CaptureConfig, args: argparse.Namespace) -> CaptureConfig:
         cfg.key_delivery = str(args.key_delivery)
     if all(getattr(args, k, None) is not None for k in ("left", "top", "width", "height")):
         cfg.rect = Rect(int(args.left), int(args.top), int(args.width), int(args.height))
+    sub = {k: getattr(args, f"sub_{k}", None) for k in ("left", "top", "width", "height")}
+    if any(v is not None for v in sub.values()):
+        cfg.window_subrect = Rect(**{k: int(v or 0) for k, v in sub.items()})
     if hasattr(args, "ocr_lang"):
         cfg.ocr_lang = str(args.ocr_lang)
     if hasattr(args, "ocr_text_prompt"):
@@ -577,6 +586,13 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
         return 2
 
     from core import windows_util as wu
+    from core.config import WINDOW_CAPTURE_PRINTWINDOW
+    from core.screen_capture import ensure_windows_capture_environment
+
+    # Same DPI awareness as run_capture, so the rects printed here are the
+    # ones the capture will use (physical pixels on scaled monitors).
+    if cfg.window_capture_backend != WINDOW_CAPTURE_PRINTWINDOW:
+        ensure_windows_capture_environment()
 
     try:
         hwnd, title = wu.pin_target_window(
@@ -631,6 +647,7 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
         )
         layout_ok = True
 
+    capture = cfg.apply_window_subrect(capture)
     left, top, width, height = capture
     cfg.pinned_capture_rect = capture
     print(

@@ -192,6 +192,12 @@ def build_book_structure(title: str, pages: list[PageRecord]) -> BookStructure:
     if current is not None:
         chapters.append(current)
     elif front_matter.blocks and not front_matter_inserted:
+        if not chapters:
+            # No chapter marker anywhere (a single chapter extracted from a
+            # book, a book without "N장" labels): it is the book, not front matter.
+            front_matter.kind = CHAPTER_KIND
+            front_matter.heading = title
+            front_matter.slug = slugify(title)
         chapters.append(front_matter)
 
     if not chapters:

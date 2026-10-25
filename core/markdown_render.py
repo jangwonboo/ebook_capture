@@ -28,6 +28,8 @@ def _render_block(block: ContentBlock, *, body_only: bool = False) -> list[str]:
     if block.section_type == "toc":
         return ["### 목차 (원본)", "", text, ""]
     if block.section_type == "figure":
+        if text.startswith("!["):
+            return [text, ""]  # image link produced by the Datalab engine
         return ["> **Figure**", ">", text.replace("\n", "\n> "), ""]
     if block.section_type == "caption":
         return [f"*{text.replace(chr(10), ' ')}*", ""]

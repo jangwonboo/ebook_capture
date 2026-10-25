@@ -82,6 +82,20 @@ python -m ebook_capture run --title Book --base-dir E:\ebook --text --input-pdf 
 - 실패한 쪽은 `OCR_PAGE_FAIL`로 남기고 나머지를 계속합니다. 끝에 `OCR_FAIL n page(s)`가 찍히면 같은 명령을 다시 실행하면 빠진 쪽만 채웁니다(완료된 쪽은 `OCR_SKIP`).
 - `OCR_COST datalab pages=N usd=X`: 응답의 `cost_breakdown.final_cost_cents` 합계(단위 센트 → 달러).
 - `--datalab-mode fast|balanced|accurate`(기본 accurate). `fast`는 PDF 텍스트 레이어를 긁어 인라인 수식을 놓칩니다.
+
+수식·그림·표·코드는 다음처럼 남습니다(기술서 한 장, 100쪽 실측: 수식 92건 표시·187건 인라인, 그림 29장, 표 10개, 코드 118블록).
+
+| 원본 | Markdown |
+| --- | --- |
+| 수식(별행) | `$$`를 앞뒤 별도 줄에 둔 블록(Typora는 한 줄짜리 `$$…$$`를 렌더하지 않음). `\begin{aligned}`의 `\\` 행 구분마다 줄바꿈 |
+| 수식(본문 속) | `$ … $`. Typora는 기본값이 꺼져 있으니 환경설정 > Markdown > "인라인 수식"을 켜야 함 |
+| 그림 | `<output_dir>/assets/<sha1 16자리>.jpg\|png`에 저장하고 `![그림](assets/…)`로 참조. 64px 미만 장식 이미지는 버림. 캡션(`그림 4-12 …`)은 그림 앞 이탤릭 줄, 앞의 장식 기호(`♥ ▼`)는 제거 |
+| 표 | 행·열이 고른 표는 파이프 표(`\| … \|`), 병합 셀(rowspan/colspan)이 있으면 HTML `<table>` 유지(셀 안 `<math>`는 `$…$`) |
+| 코드 | ` ``` ` 펜스. Datalab이 `<pre>`로 감싼 Text 블록도 코드로 봄. 쪽 경계나 줄 묶음 단위로 쪼개진 코드 블록은 사이에 러닝 헤더·쪽 번호·쪽 하단 각주만 있으면 하나로 이어 붙임(들여쓰기는 OCR 결과 그대로) |
+| 절 번호 제목 | `4.3 제목` → `###`, `4.3.1 …`(그 이하) → `####`. 번호만 러닝 헤더로 떨어진 경우(`4.8` + 다음 제목) 붙여서 복원 |
+| `C O L U M N` 상자 라벨 | 버림(상자 제목만 `####`) |
+
+장 표시(`N장`/`Chapter N`)가 한 번도 없는 입력(책에서 한 장만 잘라 변환)은 "Front matter"가 아니라 제목이 `title`인 단일 장으로 조립됩니다.
 - Picture/Figure 블록의 글(모델이 지어낸 그림 설명)은 버립니다. 표는 HTML 그대로 `table` 섹션, 수식은 `$…$` / `$$…$$`로 남습니다. `blocks_raw`(유형+HTML+bbox)가 각 `.ocr.json`에 같이 저장됩니다.
 - 제목 등급은 Marker의 h1/h2가 아니라 **블록 위치**로 정합니다(리플로우 리더는 번호 목록·인용·미주를 큰 글자로 그려서 글자 크기가 단락 성격과 맞지 않습니다). 가운데 정렬 → `section_title`(###), 왼쪽 정렬 → `subtitle`(####), 본문 폭 전체(80% 이상)나 `1. …` 번호 항목 → `body`, 그림 바로 아래 → `caption`, 장 라벨(`Chapter N`, `PART N`, `N장`) → `title`, 숫자만/장식 기호만 → 버림. 장 머리의 작은 "Chapter N" 라벨은 PageHeader로 오는데 조립 단계가 이를 장 시작으로 씁니다.
 - 본문 정리: 각주 참조 번호(`<sup>`)는 버리고, `<li>` 안에 반복된 글머리(`• 항목`)는 하나만 남기며, `1. 항목`/`1 항목` 꼴 항목은 번호 목록으로 냅니다(미주처럼 번호와 글이 다른 `<div>`로 갈라진 항목도 붙임). `full` 스타일은 이제 `<!-- pages: a-b -->` 주석을 넣지 않습니다(`AssembleOptions(page_comments=True)`로 켤 수 있음).

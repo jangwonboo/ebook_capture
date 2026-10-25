@@ -331,7 +331,7 @@ def _part_path(path: Path) -> Path:
 def _atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     part = _part_path(path)
-    part.write_text(text, encoding="utf-8")
+    part.write_text(text, encoding="utf-8", newline="\n")  # LF only (see assemble_markdown)
     os.replace(part, path)
 
 
@@ -902,6 +902,8 @@ def _ocr_page_runner(cfg: CaptureConfig, pdf_path: Path | None):
 
         spend = datalab_ocr.Spend()
         label = f"Datalab {cfg.datalab_mode}"
+        # Figures land next to the Markdown file: <output_dir>/assets/<sha1>.jpg
+        assets_dir = cfg.output_dir() / datalab_ocr.ASSETS_DIRNAME
 
         def run(page_num: int) -> dict[str, Any]:
             if pdf_path is not None:
@@ -911,12 +913,14 @@ def _ocr_page_runner(cfg: CaptureConfig, pdf_path: Path | None):
                     page_num=page_num,
                     mode=cfg.datalab_mode,
                     spend=spend,
+                    assets_dir=assets_dir,
                 )
             return datalab_ocr.extract_page_structure_from_image(
                 cfg.page_png_path(page_num),
                 page_num=page_num,
                 mode=cfg.datalab_mode,
                 spend=spend,
+                assets_dir=assets_dir,
             )
 
         return label, run, spend

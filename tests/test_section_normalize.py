@@ -61,6 +61,16 @@ def test_backmatter_header_promotes_and_repeats_do_not_split() -> None:
     assert [b.text for b in structure.chapters[0].blocks] == ["본문."]
 
 
+def test_book_without_chapter_markers_is_one_chapter_not_front_matter() -> None:
+    from core.book_structure import build_book_structure
+    from core.ocr_json_loader import PageRecord
+
+    pages = [PageRecord(1, [SectionBlock("section_title", "4.1 머신 러닝이란?"), SectionBlock("body", "본문.")]),
+             PageRecord(2, [SectionBlock("body", "계속.")])]
+    s = build_book_structure("4장", pages)
+    assert [(c.kind, c.heading) for c in s.chapters] == [("chapter", "4장")]
+
+
 def test_toc_page_with_many_labels_is_not_chapter_start() -> None:
     raw = [
         SectionBlock(type="title", text="1장"),

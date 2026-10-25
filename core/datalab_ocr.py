@@ -14,6 +14,9 @@ the chapter / paragraph Markdown exactly as it does for Gemini output.
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import io
 import os
 import re
 import threading
@@ -61,7 +64,18 @@ HTML_TAG_RE = re.compile(r"</?[a-zA-Z][^>]*>")
 H_TAG_RE = re.compile(r"<h([1-6])")
 # Marker wraps LaTeX in <math> (not MathML). Strip tags *after* converting it
 # or the delimiters vanish and ``\Delta e`` ends up as prose.
-MATH_RE = re.compile(r"<math\b[^>]*>(.*?)</math>", re.I | re.S)
+MATH_RE = re.compile(r"<math\b([^>]*)>(.*?)</math>", re.I | re.S)
+DISPLAY_ATTR_RE = re.compile(r"""display\s*=\s*["']?block""", re.I)
+
+
+def display_math(body: str) -> str:
+    """``$$`` fenced block with the fences on their own lines — the form every
+    renderer accepts (Typora ignores single-line ``$$…$$``; GitHub, Obsidian,
+    VS Code and pandoc take both). Each ``\\\\`` row break in an aligned
+    environment starts a new line so the source stays readable."""
+    body = re.sub(r"\s+", " ", body).strip()
+    body = re.sub(r"\s*\\\\\s+", lambda _m: " \\\\\n", body)
+    return f"$$\n{body}\n$$"
 LI_RE = re.compile(r"<li\b[^>]*>", re.I)
 BR_RE = re.compile(r"<br\s*/?>|</p>|</div>|</tr>", re.I)
 IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.I)
@@ -231,8 +245,12 @@ def html_to_text(html: str) -> str:
     """Strip tags but keep paragraph / list breaks and ``$…$`` math."""
 
     def keep_math(m: re.Match) -> str:
-        body = unescape(HTML_TAG_RE.sub("", m.group(1))).strip()
-        return f"${body}$" if body else ""
+        body = unescape(HTML_TAG_RE.sub("", m.group(2))).strip()
+        if not body:
+            return ""
+        if DISPLAY_ATTR_RE.search(m.group(1)):
+            return f"\n\n{display_math(body)}\n\n"  # display equation inside a text block
+        return f"${body}$"
 
     text = MATH_RE.sub(keep_math, html)
     text = IMG_TAG_RE.sub("", text)
@@ -272,15 +290,49 @@ def html_to_text(html: str) -> str:
 
 def equation_text(html: str) -> str:
     """Display equation → ``$$…$$`` (treat the whole block as LaTeX if no <math>)."""
-    bodies = [unescape(HTML_TAG_RE.sub("", b)).strip() for b in MATH_RE.findall(html)]
+    bodies = [unescape(HTML_TAG_RE.sub("", b)).strip() for _attrs, b in MATH_RE.findall(html)]
     body = " ".join(b for b in bodies if b) or unescape(HTML_TAG_RE.sub("", html)).strip()
-    body = re.sub(r"\s+", " ", body)
-    return f"$${body}$$" if body else ""
+    return display_math(body) if body.strip() else ""
+
+
+TABLE_ROW_RE = re.compile(r"<tr\b[^>]*>(.*?)</tr>", re.I | re.S)
+TABLE_CELL_RE = re.compile(r"<(t[dh])\b([^>]*)>(.*?)</t[dh]>", re.I | re.S)
+SPAN_ATTR_RE = re.compile(r"\b(?:row|col)span\s*=\s*[\"']?(\d+)", re.I)
+
+
+def _cell_text(html: str) -> str:
+    """Cell content as one Markdown line: math kept as ``$…$``, breaks as spaces."""
+    text = html_to_text(html).replace("\n", " ")
+    return re.sub(r"\s+", " ", text).strip().replace("|", "\\|")
 
 
 def table_text(html: str) -> str:
-    """Tables keep their HTML: structure is the content. Images are dropped."""
+    """A regular grid (no row/col spans, one header row) becomes a Markdown
+    pipe table. Anything else keeps its HTML, with the math and images
+    normalised, because the structure is the content."""
     html = IMG_TAG_RE.sub("", html)
+    rows = []
+    regular = True
+    for row_html in TABLE_ROW_RE.findall(html):
+        cells = TABLE_CELL_RE.findall(row_html)
+        if not cells:
+            continue
+        if any(int(m) > 1 for _, attrs, _ in cells for m in SPAN_ATTR_RE.findall(attrs)):
+            regular = False
+        rows.append([(tag.lower(), _cell_text(body)) for tag, _attrs, body in cells])
+    if not rows:
+        return ""
+    width = len(rows[0])
+    if regular and width >= 2 and len(rows) >= 2 and all(len(r) == width for r in rows):
+        header = [c for _, c in rows[0]]
+        body = rows[1:]
+        if not all(tag == "th" for tag, _ in rows[0]):
+            header = [""] * width
+            body = rows
+        lines = ["| " + " | ".join(header) + " |", "|" + " --- |" * width]
+        lines += ["| " + " | ".join(c for _, c in r) + " |" for r in body]
+        return "\n".join(lines)
+    html = MATH_RE.sub(lambda m: f"${unescape(m.group(2)).strip()}$", html)
     return re.sub(r"\s+", " ", html).strip()
 
 
@@ -303,6 +355,15 @@ HEADING_FULL_WIDTH_RATIO = 0.80
 HEADING_CENTER_TOLERANCE = 0.05
 ORNAMENT_RE = re.compile(r"^[\s•●▪■◆◇○∙·.…⋮*\-–—]+$")
 DIGITS_RE = re.compile(r"^\d{1,3}$")
+PRE_RE = re.compile(r"\s*<pre\b", re.I)
+# Dotted section numbers at the start of a heading: "4.3 제목", "4.3.3.1 학습 단계".
+SECTION_NUMBER_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,2})+)\.?\s+\S")
+# A section number set apart from its title ("4.8" in the running head, title
+# in the next SectionHeader): glued to that title.
+BARE_SECTION_NUMBER_RE = re.compile(r"^\d{1,2}(?:\.\d{1,2})+$")
+COLUMN_LABEL_RE = re.compile(r"^\s*C\s*O\s*L\s*U\s*M\s*N\s*$", re.I)
+# Marker glyphs printed before captions ("♥ 그림 4-12 …", "▼ 표 4-1 …").
+CAPTION_MARK_RE = re.compile(r"^[♥♡▼▽▾▸▶►◆◇■□●○✔✓]+\s*")
 # "3. 정서적 결핍: ..." — a numbered list item set in display type.
 NUMBERED_ITEM_RE = re.compile(r"^\d{1,3}\.\s+\S")
 # "Chapter 2. 권력은 ..." / "Chapter 1 • ..." — a chapter reference with its
@@ -336,8 +397,15 @@ def classify_heading(
 
     if not text or ORNAMENT_RE.match(text) or DIGITS_RE.match(text):
         return None
+    if COLUMN_LABEL_RE.match(text):
+        return None  # "C O L U M N" box label: a design element, the box title follows
     if chapter_marker_in_text(text):
         return "title"
+    m = SECTION_NUMBER_RE.match(text)
+    if m:
+        # "4.3 제목" is a section, "4.3.1 제목" (and deeper) a sub-section,
+        # wherever it sits (a numbered heading right under a figure is no caption).
+        return "section_title" if m.group(1).count(".") == 1 else "subtitle"
     if after_figure:
         return "caption"
     if NUMBERED_ITEM_RE.match(text):
@@ -355,20 +423,88 @@ def classify_heading(
     return "section_title"
 
 
-def chunks_to_sections(chunks: list[dict]) -> list[dict[str, str]]:
+#: Smaller images are decorations (bullets, rules), not figures.
+MIN_FIGURE_PX = 64
+ASSETS_DIRNAME = "assets"
+
+
+def harvest_images(chunk: dict, assets_dir: Path | None) -> list[str]:
+    """Save the images carried by a chunk; return their paths relative to the
+    Markdown file (``assets/<sha1>.jpg``).
+
+    Every chunk is checked, not only Picture blocks: a cover illustration can
+    arrive embedded in a SectionHeader. Ids are content hashes because
+    Datalab's file names are layout-based and collide between pages. When the
+    chunk comes from a stored ``blocks_raw`` the field is already a list of
+    saved paths and is returned as is."""
+    images = chunk.get("images")
+    if not images:
+        return []
+    if isinstance(images, list):
+        return [str(p) for p in images]
+    if assets_dir is None:
+        return []
+    from PIL import Image
+
+    out: list[str] = []
+    for _name, b64 in images.items():
+        try:
+            data = base64.b64decode(b64)
+            with Image.open(io.BytesIO(data)) as im:
+                w, h = im.size
+                fmt = (im.format or "").lower()
+        except Exception:
+            continue
+        if min(w, h) < MIN_FIGURE_PX:
+            continue
+        ext = "png" if fmt == "png" else "jpg"
+        name = f"{hashlib.sha1(data).hexdigest()[:16]}.{ext}"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        target = assets_dir / name
+        if not target.exists():
+            target.write_bytes(data)
+        out.append(f"{ASSETS_DIRNAME}/{name}")
+    return out
+
+
+def _figure_sections(paths: list[str], alt: str = "") -> list[dict[str, str]]:
+    """One ``figure`` section per saved image. The alt text stays a plain
+    label: what Datalab puts in the Picture block is a description the model
+    wrote, not text printed on the page."""
+    return [{"type": "figure", "text": f"![그림]({p})"} for p in paths]
+
+
+def chunks_to_sections(
+    chunks: list[dict], assets_dir: Path | None = None
+) -> list[dict[str, str]]:
     """Map Datalab chunks onto this repo's OCR section list."""
     sections: list[dict[str, str]] = []
     geometry = _page_geometry(chunks)
     prev_type = ""
+    pending_number = ""  # "4.8" seen on its own, waiting for its title
     for chunk in chunks:
         block_type = str(chunk.get("block_type") or "")
         html = str(chunk.get("html") or "")
+        # Figure data is kept even when the block's text is dropped.
+        paths = harvest_images(chunk, assets_dir)
+        if paths:
+            alt = html_to_text(html) if block_type in DROP_TYPES else ""
+            sections.extend(_figure_sections(paths, alt))
+        if block_type in ("PageHeader", "SectionHeader"):
+            bare = html_to_text(html).strip()
+            if BARE_SECTION_NUMBER_RE.match(bare):
+                pending_number = bare
+                prev_type = block_type
+                continue
         if block_type in DROP_TYPES:
             prev_type = block_type
             continue
         if block_type == "SectionHeader":
             text = html_to_text(html).replace("\n", " ").strip()
             text = re.sub(r"^[•●▪■◆◇○\-–—]+\s*", "", text)
+            if pending_number and not SECTION_NUMBER_RE.match(text):
+                text = f"{pending_number} {text}"
+            pending_number = ""
             kind = classify_heading(
                 text, chunk.get("bbox"), geometry,
                 after_figure=prev_type in DROP_TYPES or bool(chunk.get("images")),
@@ -378,6 +514,8 @@ def chunks_to_sections(chunks: list[dict]) -> list[dict[str, str]]:
             prev_type = block_type
             continue
         section_type = TYPE_MAP.get(block_type, "body")
+        if section_type == "body" and PRE_RE.match(html):
+            section_type = "code"  # code listings arrive as Text wrapped in <pre>
         if section_type == "table":
             text = table_text(html)
         elif section_type == "equation":
@@ -386,6 +524,8 @@ def chunks_to_sections(chunks: list[dict]) -> list[dict[str, str]]:
             text = code_text(html)
         else:
             text = html_to_text(html)
+        if section_type == "caption":
+            text = CAPTION_MARK_RE.sub("", text)
         if text and not (section_type == "body" and ORNAMENT_RE.match(text)):
             sections.append({"type": section_type, "text": text})
         prev_type = block_type
@@ -403,18 +543,21 @@ def rebuild_page_structure(page: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _strip_images(chunks: list[dict]) -> list[dict[str, Any]]:
-    """Raw chunks kept for debugging, minus the base64 image payloads."""
+def _strip_images(chunks: list[dict], assets_dir: Path | None = None) -> list[dict[str, Any]]:
+    """Raw chunks kept for rebuilds, with image payloads replaced by the
+    paths of the files ``harvest_images`` saved (so a rebuild needs no API)."""
     kept: list[dict[str, Any]] = []
     for chunk in chunks:
-        kept.append(
-            {
-                "block_type": chunk.get("block_type"),
-                "html": chunk.get("html"),
-                "bbox": chunk.get("bbox"),
-                "page": chunk.get("page"),
-            }
-        )
+        item: dict[str, Any] = {
+            "block_type": chunk.get("block_type"),
+            "html": chunk.get("html"),
+            "bbox": chunk.get("bbox"),
+            "page": chunk.get("page"),
+        }
+        paths = harvest_images(chunk, assets_dir)
+        if paths:
+            item["images"] = paths
+        kept.append(item)
     return kept
 
 
@@ -424,14 +567,16 @@ def sections_to_text(sections: list[dict[str, str]]) -> str:
     return "\n\n".join(parts).strip()
 
 
-def chunks_to_page_structure(chunks: list[dict], page_num: int) -> dict[str, Any]:
-    sections = chunks_to_sections(chunks)
+def chunks_to_page_structure(
+    chunks: list[dict], page_num: int, assets_dir: Path | None = None
+) -> dict[str, Any]:
+    sections = chunks_to_sections(chunks, assets_dir)
     return {
         "page": int(page_num),
         "text": sections_to_text(sections),
         "sections": sections,
         "engine": ENGINE_NAME,
-        "blocks_raw": _strip_images(chunks),
+        "blocks_raw": _strip_images(chunks, assets_dir),
     }
 
 
@@ -444,6 +589,7 @@ def extract_page_structure_from_image(
     api_key: str | None = None,
     spend: Spend | None = None,
     timeout_s: int = 300,
+    assets_dir: Path | str | None = None,
 ) -> dict[str, Any]:
     path = Path(image_path)
     key = find_key(api_key)
@@ -460,7 +606,9 @@ def extract_page_structure_from_image(
         raise RuntimeError(f"Datalab OCR failed: {exc}") from exc
     except Exception as exc:  # httpx errors
         raise RuntimeError(f"Datalab OCR API call failed: {exc}") from exc
-    return chunks_to_page_structure(chunks, page_num)
+    return chunks_to_page_structure(
+        chunks, page_num, Path(assets_dir) if assets_dir else None
+    )
 
 
 def extract_page_structure_from_pdf_page(
@@ -472,6 +620,7 @@ def extract_page_structure_from_pdf_page(
     api_key: str | None = None,
     spend: Spend | None = None,
     timeout_s: int = 300,
+    assets_dir: Path | str | None = None,
 ) -> dict[str, Any]:
     """OCR one page of a PDF (0-based ``page_index``) by sending a one-page PDF."""
     from core.pdf_input import extract_pdf_page_bytes
@@ -496,4 +645,6 @@ def extract_page_structure_from_pdf_page(
         raise RuntimeError(f"Datalab OCR failed: {exc}") from exc
     except Exception as exc:
         raise RuntimeError(f"Datalab OCR API call failed: {exc}") from exc
-    return chunks_to_page_structure(chunks, page_num)
+    return chunks_to_page_structure(
+        chunks, page_num, Path(assets_dir) if assets_dir else None
+    )

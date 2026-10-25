@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from core.ocr_json_loader import PageRecord, SectionBlock
+from core.ocr_json_loader import SKIP_SECTION_TYPES, PageRecord, SectionBlock
 
 _KO_CONTINUATION_PREFIXES = (
     "로는 ",
@@ -198,8 +198,69 @@ def merge_cross_page_paragraphs(pages: list[PageRecord]) -> list[PageRecord]:
     return merged_pages
 
 
+_FENCE_RE = re.compile(r"^```[^\n]*\n?|\n?```\s*$")
+
+
+def _unfence(text: str) -> str:
+    return _FENCE_RE.sub("", text).strip("\n")
+
+
+def _merge_two_code(prev: SectionBlock, nxt: SectionBlock) -> SectionBlock:
+    a, b = _unfence(prev.text), _unfence(nxt.text)
+    body = f"{a}\n{b}" if a and b else a or b
+    return SectionBlock(type="code", text=f"```\n{body}\n```")
+
+
+def merge_code_blocks(pages: list[PageRecord]) -> list[PageRecord]:
+    """Join code blocks that follow each other with nothing but running
+    heads / page numbers between them — one listing that the layout engine
+    cut at a page break or into one block per visual line group. Only the
+    fence is removed at the seam; the lines themselves are left as OCR gave
+    them."""
+    out: list[PageRecord] = []
+    last_code: SectionBlock | None = None  # trailing code block of the previous page
+    last_page: PageRecord | None = None
+    for page in pages:
+        sections: list[SectionBlock] = []
+        for sec in page.sections:
+            if sec.type in SKIP_SECTION_TYPES:
+                sections.append(sec)
+                continue
+            if sec.type == "code":
+                if sections and sections[-1].type == "code":
+                    sections[-1] = _merge_two_code(sections[-1], sec)
+                    continue
+                if last_code is not None and not any(
+                    s.type not in SKIP_SECTION_TYPES for s in sections
+                ):
+                    # First content block of this page continues the previous page's listing.
+                    merged = _merge_two_code(last_code, sec)
+                    assert last_page is not None
+                    last_page.sections[last_page.sections.index(last_code)] = merged
+                    last_code = merged
+                    continue
+            last_code = None
+            sections.append(sec)
+        content = [s for s in sections if s.type not in SKIP_SECTION_TYPES]
+        while content and content[-1].type == "footnote":
+            content.pop()  # page-bottom footnotes do not end a listing
+        if content and content[-1].type == "code":
+            last_code = content[-1]
+        elif content:
+            last_code = None
+        if not content and last_code is not None:
+            pass  # a page of running heads only: keep waiting for the continuation
+        new_page = PageRecord(page_num=page.page_num, sections=sections)
+        out.append(new_page)
+        if content:
+            last_page = new_page
+        elif last_page is None:
+            last_page = new_page
+    return out
+
+
 def normalize_paragraphs(pages: list[PageRecord]) -> list[PageRecord]:
-    """Reflow layout line breaks and merge split body paragraphs."""
+    """Reflow layout line breaks and merge split body paragraphs / code listings."""
     from core.text_reflow import reflow_page_sections
 
     reflowed = [
@@ -207,4 +268,4 @@ def normalize_paragraphs(pages: list[PageRecord]) -> list[PageRecord]:
         for page in pages
     ]
     within = [merge_within_page_paragraphs(page) for page in reflowed]
-    return merge_cross_page_paragraphs(within)
+    return merge_code_blocks(merge_cross_page_paragraphs(within))

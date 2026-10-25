@@ -25,7 +25,9 @@ def _emit(progress: ProgressFn | None, msg: str) -> None:
 def _atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     part = path.with_name(path.name + ".part")
-    part.write_text(text, encoding="utf-8")
+    # LF only: Path.write_text would emit CRLF on Windows, and a CR after the
+    # ``\\`` row break inside a ``$$`` block breaks Typora's math rendering.
+    part.write_text(text, encoding="utf-8", newline="\n")
     os.replace(part, path)
 
 

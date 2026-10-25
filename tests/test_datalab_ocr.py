@@ -17,8 +17,15 @@ def test_inline_math_unescapes_entities() -> None:
 
 
 def test_equation_block_becomes_display_math() -> None:
-    assert dl.equation_text('<math display="block">E = mc^2</math>') == "$$E = mc^2$$"
-    assert dl.equation_text("<p>x^2 + y^2 = z^2</p>") == "$$x^2 + y^2 = z^2$$"
+    assert dl.equation_text('<math display="block">E = mc^2</math>') == "$$\nE = mc^2\n$$"
+    assert dl.equation_text("<p>x^2 + y^2 = z^2</p>") == "$$\nx^2 + y^2 = z^2\n$$"
+    # aligned rows each on their own line; fences alone on theirs (Typora needs this)
+    assert dl.equation_text(
+        '<math display="block">\\begin{aligned} a &= b \\\\ &= c \\end{aligned}</math>'
+    ) == "$$\n\\begin{aligned} a &= b \\\\\n&= c \\end{aligned}\n$$"
+    # display math embedded in a text block becomes its own paragraph
+    text = dl.html_to_text('<p>식은 <math display="block">y = x</math> 이다.</p>')
+    assert "\n\n$$\ny = x\n$$\n\n" in text
 
 
 def test_lists_and_breaks_become_lines() -> None:
@@ -65,7 +72,7 @@ def test_chunk_type_mapping() -> None:
         ("caption", "그림 1"),
         ("footnote", "1 각주"),
         ("table", "<table><tr><td>a</td></tr></table>"),
-        ("equation", "$$E = mc^2$$"),
+        ("equation", "$$\nE = mc^2\n$$"),
         ("page_number", "42"),
     ]
 
@@ -89,6 +96,87 @@ def test_heading_classified_by_position_not_tag_level() -> None:
     assert out[1]["text"].startswith("무엇이") and out[2]["text"] == "신체적 능력"
     assert out[3]["text"].startswith("3. 정서적") and out[5]["text"] == "PART 1"
     assert dl.classify_heading("Chapter 2. 권력은 어디에서 오는가", [92, 0, 1450, 80], (769, 1420)) == "subtitle"
+    assert dl.classify_heading("4.3 나이브 베이즈", [92, 0, 400, 80], (769, 1420)) == "section_title"
+    assert dl.classify_heading("4.3.3.1 학습 단계", [92, 0, 400, 80], (769, 1420)) == "subtitle"
+
+
+def test_code_blocks_split_by_page_break_are_joined() -> None:
+    from core.ocr_json_loader import PageRecord, SectionBlock
+    from core.paragraph_merge import merge_code_blocks
+
+    pages = [
+        PageRecord(1, [SectionBlock("body", "코드는 다음과 같습니다."),
+                       SectionBlock("code", "```\nimport sys\n```"),
+                       SectionBlock("code", "```\nclass A:\n    def f(self):\n```"),
+                       SectionBlock("footnote", "1 역주"),
+                       SectionBlock("page_number", "12")]),
+        PageRecord(2, [SectionBlock("header", "MACHINE LEARNING"),
+                       SectionBlock("code", "```\n\n        return 1\n```"),
+                       SectionBlock("body", "설명.")]),
+        PageRecord(3, [SectionBlock("code", "```\n$ pip install x\n```")]),
+    ]
+    out = merge_code_blocks(pages)
+    assert [s.text for s in out[0].sections if s.type == "code"] == [
+        "```\nimport sys\nclass A:\n    def f(self):\n        return 1\n```"
+    ]
+    assert [s.type for s in out[1].sections] == ["header", "body"]
+    # a code block after a body paragraph starts a new listing
+    assert out[2].sections[0].text == "```\n$ pip install x\n```"
+
+
+def test_regular_table_becomes_pipe_table() -> None:
+    html = ("<table><tr><th>출력</th><th>분류</th></tr>"
+            "<tr><td>계산</td><td>카테고리 <math>c</math>를 출력</td></tr></table>")
+    assert dl.table_text(html) == "| 출력 | 분류 |\n| --- | --- |\n| 계산 | 카테고리 $c$를 출력 |"
+    # Spans keep HTML (structure is the content), math normalised.
+    spanned = "<table><tr><th colspan=\"2\">x</th></tr><tr><td>1</td><td><math>c</math></td></tr></table>"
+    out = dl.table_text(spanned)
+    assert out.startswith("<table>") and "$c$" in out
+
+
+def test_bare_section_number_is_glued_to_next_heading() -> None:
+    chunks = [
+        {"block_type": "PageHeader", "html": "<p>4.8</p>", "bbox": [166, 112, 266, 182]},
+        {"block_type": "PageHeader", "html": "<p>MACHINE LEARNING</p>", "bbox": [631, 105, 1085, 130]},
+        {"block_type": "SectionHeader", "html": "<h2>자기 회귀</h2>", "bbox": [310, 147, 508, 208]},
+        {"block_type": "SectionHeader", "html": "<h2>C O L U M N</h2>", "bbox": [959, 1220, 1137, 1251]},
+        {"block_type": "Caption", "html": "<p>♥ 그림 4-12 분류 방식</p>", "bbox": [100, 300, 500, 320]},
+        {"block_type": "Picture", "html": "", "bbox": [100, 330, 900, 700]},
+        {"block_type": "SectionHeader", "html": "<h2>4.2.2.1 지도 학습</h2>", "bbox": [100, 720, 400, 760]},
+    ]
+    secs = [s for s in dl.chunks_to_sections(chunks) if s["type"] != "header"]
+    assert secs == [
+        {"type": "section_title", "text": "4.8 자기 회귀"},
+        {"type": "caption", "text": "그림 4-12 분류 방식"},
+        {"type": "subtitle", "text": "4.2.2.1 지도 학습"},
+    ]
+
+
+def test_images_are_harvested_as_figures(tmp_path) -> None:
+    import base64
+    import io
+    from PIL import Image
+
+    def png(w, h):
+        buf = io.BytesIO()
+        Image.new("RGB", (w, h), "white").save(buf, "PNG")
+        return base64.b64encode(buf.getvalue()).decode()
+
+    chunks = [
+        {"block_type": "Picture", "html": "<p>A plot of y = x</p>",
+         "images": {"_page_0_Picture_1.png": png(200, 120), "tiny.png": png(10, 10)}},
+        {"block_type": "Caption", "html": "<p>그림 4-1 산점도</p>"},
+    ]
+    assets = tmp_path / "assets"
+    page = dl.chunks_to_page_structure(chunks, 5, assets)
+    figs = [s for s in page["sections"] if s["type"] == "figure"]
+    assert len(figs) == 1 and figs[0]["text"].startswith("![그림](assets/")
+    assert len(list(assets.glob("*.png"))) == 1
+    assert page["sections"][1] == {"type": "caption", "text": "그림 4-1 산점도"}
+    # blocks_raw keeps the saved paths, so a rebuild needs no API call.
+    assert page["blocks_raw"][0]["images"] == [figs[0]["text"].split("](")[1][:-1]]
+    rebuilt = dl.rebuild_page_structure(page)
+    assert rebuilt["sections"] == page["sections"]
 
 
 def test_rebuild_page_structure_from_blocks_raw() -> None:
@@ -208,3 +296,11 @@ def test_short_toc_lines_are_not_merged_across_pages() -> None:
     texts = [s.text for p in out for s in p.sections]
     assert texts[0] == "위계의 장점" and texts[1] == "위계의 단점"
     assert texts[2].startswith("그는 그것을") and texts[2].endswith("않았다.")
+
+
+def test_pre_text_block_becomes_fenced_code() -> None:
+    nl = chr(10)
+    html = "<pre>import math" + nl + nl + "class A(object):" + nl + "    pass</pre>"
+    out = dl.chunks_to_sections([{"block_type": "Text", "html": html}])
+    assert out[0]["type"] == "code"
+    assert out[0]["text"] == "```" + nl + "import math" + nl + nl + "class A(object):" + nl + "    pass" + nl + "```"

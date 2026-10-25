@@ -370,6 +370,8 @@ ORNAMENT_RE = re.compile(r"^[\s•●▪■◆◇○∙·.…⋮*\-–—]+$")
 DIGITS_RE = re.compile(r"^\d{1,3}$")
 # A chapter opener set as a big bare number ("01" over the chapter title).
 CHAPTER_NUMBER_LABEL_RE = re.compile(r"^\d{1,2}$")
+#: A word set alone above the chapter number on an opener page ("CHAPTER" / "1" / title).
+CHAPTER_WORD_RE = re.compile(r"^(?:chapter|part)$", re.IGNORECASE)
 PRE_RE = re.compile(r"\s*<pre\b", re.I)
 # Dotted section numbers at the start of a heading: "4.3 제목", "4.3.3.1 학습 단계".
 SECTION_NUMBER_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,2})+)\.?\s+\S")
@@ -526,6 +528,9 @@ def chunks_to_sections(
             if CHAPTER_NUMBER_LABEL_RE.match(bare) and _opens_chapter(chunks, i, sections, geometry):
                 # "01" set large over the chapter title (either block may be
                 # tagged PageHeader by the layout model): the chapter label.
+                # A "CHAPTER" word above the number is part of the label.
+                while sections and CHAPTER_WORD_RE.match(sections[-1]["text"]):
+                    sections.pop()
                 sections.append({"type": "title", "text": f"{int(bare)}장"})
                 chapter_title_pending = True
                 prev_type = block_type
@@ -613,7 +618,10 @@ def _opens_chapter(
     big = _is_display_size(chunks[i], geometry)
     if big is False or (big is None and not H_TAG_RE.search(str(chunks[i].get("html") or ""))):
         return False
-    if any(s["type"] not in ("header", "page_number", "figure") for s in sections):
+    if any(
+        s["type"] not in ("header", "page_number", "figure") and not CHAPTER_WORD_RE.match(s["text"])
+        for s in sections
+    ):
         return False
     if i + 1 >= len(chunks):
         return False

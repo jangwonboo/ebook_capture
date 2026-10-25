@@ -173,6 +173,16 @@ def test_bare_number_over_title_is_a_chapter_label() -> None:
         {"type": "title", "text": "텍스트 표현"},
         {"type": "body", "text": "이전 장들에서는 분류와 생성 문제를 처리했다."},
     ]
+    # "CHAPTER" set alone above the number is part of the label, not a heading.
+    worded = [
+        {"block_type": "SectionHeader", "html": "<h1>CHAPTER</h1>", "bbox": [280, 394, 571, 467]},
+        {"block_type": "SectionHeader", "html": "<h1>1</h1>", "bbox": [519, 532, 595, 708]},
+        {"block_type": "SectionHeader", "html": "<h2>자연어 처리와<br/>허깅페이스</h2>", "bbox": [703, 926, 1400, 1251]},
+    ]
+    assert dl.chunks_to_sections(worded) == [
+        {"type": "title", "text": "1장"},
+        {"type": "title", "text": "자연어 처리와 허깅페이스"},
+    ]
     # A small page number followed by a heading at the top of the page is not a label.
     pageno = [
         {"block_type": "PageHeader", "html": "<p>31</p>", "bbox": [1984, 127, 2045, 177]},

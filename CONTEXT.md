@@ -53,6 +53,8 @@
 
 운영 실수 기록: Git Bash에서 `--base-dir D:\ebook`을 따옴표 없이 넘겨 백슬래시가 사라졌고(`D:ebook` = 드라이브 상대 경로) 출력이 `D:\projects\ebook\…`로 갔다. 그래서 미리 복사해 둔 4장 OCR 결과를 못 보고 100쪽을 다시 보냈다(약 $0.72 낭비). Windows 경로는 항상 따옴표로 감싸거나 슬래시로 쓴다. 결과 폴더는 `D:\ebook\데이터분석을_위한_머신러닝_입문\`로 옮겼다.
 
+**2026-10-25 허깅페이스_트랜스포머_하드_트레이닝 PDF→MD(318쪽, Datalab $2.38 + 교정 $1.53, 119건 적용).** 첫 조립은 장 2개(Front matter·찾아보기)뿐이었다. 장 머리가 `CHAPTER`(SectionHeader) → `1`(큰 숫자) → 제목 순인데, `_opens_chapter`가 "숫자 앞에는 header/page_number/figure만" 조건으로 `CHAPTER` 섹션 때문에 거부했고 숫자는 버려졌다. `CHAPTER_WORD_RE`(`chapter|part`)를 라벨의 일부로 보고 무시·제거하도록 고친 뒤 `rebuild_page_structure`로 재조립(재OCR 없음, 교정 캐시 308/316 적중, $0.01) → 8장 전부 검출. 출력은 `D:\ebook\nlp_llm_agents\{title}\`, 최종 md는 PDF 옆에 복사. 장 첫 쪽의 절 목록(`1.1 … / 1.2 …`)은 `- ` 목록으로 조립된다.
+
 미검증: 없음(포커스 이탈 재시도는 세 번째 책에서 실측).
 
 ## 1. 한 줄 요약

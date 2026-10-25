@@ -199,6 +199,32 @@ def test_plan_text_from_pdf(tmp_path: Path) -> None:
     assert planned.input_pdf == str(pdf.resolve())
 
 
+def test_explicit_input_pdf_beats_existing_pngs(tmp_path: Path) -> None:
+    src = tmp_path / "book.pdf"
+    c = canvas.Canvas(str(src))
+    for _ in range(2):
+        c.drawString(72, 720, "x")
+        c.showPage()
+    c.save()
+    cfg = CaptureConfig(
+        title="Book",
+        base_dir=str(tmp_path),
+        output_mode=OUTPUT_TEXT,
+        n_pages=3,
+        input_pdf=str(src),
+    )
+    for page in (1, 2, 3):
+        _touch(cfg.page_png_path(page))
+    steps, planned = plan_job(cfg)
+    assert steps[0].kind == StepKind.OCR_FROM_PDF
+    assert planned.n_pages == 2 and planned.input_pdf == str(src.resolve())
+
+    # Default n_pages (1) with an explicit PDF means the whole PDF.
+    cfg.n_pages = 1
+    _, planned = plan_job(cfg)
+    assert planned.n_pages == 2
+
+
 def test_plan_text_no_source_raises(tmp_path: Path) -> None:
     cfg = CaptureConfig(title="Book", base_dir=str(tmp_path), output_mode=OUTPUT_TEXT)
     with pytest.raises(ValueError, match="No PNG or PDF"):

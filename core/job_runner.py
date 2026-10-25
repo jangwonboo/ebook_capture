@@ -11,7 +11,15 @@ from core.job_plan import StepKind, confirm_steps, plan_job
 from core.pipeline import run_capture
 
 
-def run_output_job(cfg: CaptureConfig, *, assume_yes: bool = False) -> int:
+def run_output_job(
+    cfg: CaptureConfig,
+    *,
+    assume_yes: bool = False,
+    fix_typos: bool = True,
+    typo_frequency: bool = False,
+    llm_proofread: bool = False,
+    proofread_model: str | None = None,
+) -> int:
     try:
         steps, planned_cfg = plan_job(cfg)
     except ValueError as exc:
@@ -29,7 +37,13 @@ def run_output_job(cfg: CaptureConfig, *, assume_yes: bool = False) -> int:
             return rc
 
     if StepKind.ASSEMBLE in kinds:
-        options = AssembleOptions.from_cli(style=planned_cfg.assemble_style)
+        options = AssembleOptions.from_cli(
+            style=planned_cfg.assemble_style,
+            fix_typos=fix_typos,
+            typo_frequency=typo_frequency,
+            llm_proofread=llm_proofread,
+            proofread_model=proofread_model,
+        )
         try:
             planned_cfg.skip_capture = True
             planned_cfg.validate()

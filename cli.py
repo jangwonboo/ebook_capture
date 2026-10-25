@@ -90,6 +90,35 @@ def _add_run_options(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Markdown style for --text (default: assemble_style in config).",
     )
+    parser.add_argument(
+        "--no-typo-fix",
+        dest="fix_typos",
+        action="store_false",
+        default=True,
+        help="Skip OCR typo correction (ocr_typos.txt dictionary) when assembling.",
+    )
+    parser.add_argument(
+        "--typo-freq",
+        dest="typo_frequency",
+        action="store_true",
+        default=False,
+        help="Also guess typos from in-book word frequency (many false hits; review "
+        "{title}_typo_fixes.txt).",
+    )
+    parser.add_argument(
+        "--proofread",
+        dest="llm_proofread",
+        action="store_true",
+        default=False,
+        help="Ask Claude for OCR misread corrections page by page (paid, ANTHROPIC_API_KEY; "
+        "cached in tmp/*.proof.json; fixes listed in {title}_typo_fixes.txt).",
+    )
+    parser.add_argument(
+        "--proofread-model",
+        dest="proofread_model",
+        default=None,
+        help="Model for --proofread (default claude-opus-5-5).",
+    )
     parser.add_argument("--ocr-lang", dest="ocr_lang", default=argparse.SUPPRESS)
     parser.add_argument(
         "--ocr-engine",
@@ -513,7 +542,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
             return 2
         cfg.prefer_foreground_window_match = True
 
-    return run_output_job(cfg, assume_yes=bool(getattr(args, "yes", False)))
+    return run_output_job(
+        cfg,
+        assume_yes=bool(getattr(args, "yes", False)),
+        fix_typos=bool(getattr(args, "fix_typos", True)),
+        typo_frequency=bool(getattr(args, "typo_frequency", False)),
+        llm_proofread=bool(getattr(args, "llm_proofread", False)),
+        proofread_model=getattr(args, "proofread_model", None),
+    )
 
 
 def _cmd_test_key(args: argparse.Namespace) -> int:

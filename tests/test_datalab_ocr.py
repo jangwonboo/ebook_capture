@@ -148,6 +148,47 @@ def test_chapter_label_with_sup_and_wide_title() -> None:
     ]
 
 
+def test_bare_number_over_title_is_a_chapter_label() -> None:
+    # Chapter opener set as "01" above the title (no "장" anywhere); inline
+    # emphasis must not inject spaces into the title or the body.
+    chunks = [
+        {"block_type": "SectionHeader", "html": "<h1>01</h1>", "bbox": [100, 100, 180, 180]},
+        {"block_type": "SectionHeader", "html": "<h2>BoW(단어 주머니)에서<br/><u>트랜스포</u>머까지</h2>", "bbox": [100, 200, 700, 300]},
+        {"block_type": "Text", "html": "<p>지난 20년간 <b>자연어 처리</b>(natural language processing, <b>NLP</b>) 분야</p>", "bbox": [100, 320, 700, 400]},
+    ]
+    assert dl.chunks_to_sections(chunks) == [
+        {"type": "title", "text": "1장"},
+        {"type": "title", "text": "BoW(단어 주머니)에서 트랜스포머까지"},
+        {"type": "body", "text": "지난 20년간 자연어 처리(natural language processing, NLP) 분야"},
+    ]
+    # Right-hand opener: both the number and the title tagged PageHeader, told
+    # apart from a page number by their display size.
+    right = [
+        {"block_type": "PageHeader", "html": "<p>07</p>", "bbox": [1800, 194, 1948, 302]},
+        {"block_type": "PageHeader", "html": "텍스트<br/>표현", "bbox": [1750, 407, 1950, 576]},
+        {"block_type": "Text", "html": "<p>이전 장들에서는 분류와 생성 문제를 처리했다.</p>", "bbox": [374, 1275, 1952, 2112]},
+    ]
+    assert dl.chunks_to_sections(right) == [
+        {"type": "title", "text": "7장"},
+        {"type": "title", "text": "텍스트 표현"},
+        {"type": "body", "text": "이전 장들에서는 분류와 생성 문제를 처리했다."},
+    ]
+    # A small page number followed by a heading at the top of the page is not a label.
+    pageno = [
+        {"block_type": "PageHeader", "html": "<p>31</p>", "bbox": [1984, 127, 2045, 177]},
+        {"block_type": "SectionHeader", "html": "<h2>아나콘다 설치</h2>", "bbox": [374, 300, 900, 360]},
+        {"block_type": "Text", "html": "<p>본문.</p>", "bbox": [374, 400, 1952, 600]},
+    ]
+    assert [s["type"] for s in dl.chunks_to_sections(pageno)] == ["header", "subtitle", "body"]
+    # A bare number in the middle of a page, or followed by a numbered section, is not a label.
+    mid = [
+        {"block_type": "Text", "html": "<p>본문.</p>", "bbox": [100, 100, 700, 150]},
+        {"block_type": "SectionHeader", "html": "<h2>3</h2>", "bbox": [100, 200, 180, 240]},
+        {"block_type": "SectionHeader", "html": "<h2>2.2 설치</h2>", "bbox": [100, 260, 500, 300]},
+    ]
+    assert [s["text"] for s in dl.chunks_to_sections(mid)] == ["본문.", "2.2 설치"]
+
+
 def test_front_matter_headings_are_not_chapters() -> None:
     # TOC lines end with a page number; a "N장" label without a title after it
     # is a picture label; an all-caps running head tagged as heading is a header.

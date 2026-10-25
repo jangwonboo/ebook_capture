@@ -23,10 +23,22 @@ _STYLE_DEFAULTS: dict[AssembleStyle, tuple[bool, bool, bool]] = {
 class AssembleOptions:
     style: AssembleStyle = AssembleStyle.FULL
     page_comments: bool | None = None
+    # OCR typo correction (dictionary + in-book frequency); only with fix_text.
+    fix_typos: bool = True
+    # In-book frequency heuristic on top of the dictionary (opt-in: many false hits).
+    typo_frequency: bool = False
+    # Claude proofreading of OCR misreads (paid; cached per page in tmp/*.proof.json).
+    llm_proofread: bool = False
+    proofread_model: str = "claude-opus-5-5"
+    proofread_workers: int = 4
 
     @property
     def fix_text(self) -> bool:
         return _STYLE_DEFAULTS[self.style][0]
+
+    @property
+    def fix_ocr_typos(self) -> bool:
+        return self.fix_text and self.fix_typos
 
     @property
     def body_only(self) -> bool:
@@ -43,5 +55,18 @@ class AssembleOptions:
         *,
         style: str = "full",
         page_comments: bool | None = None,
+        fix_typos: bool = True,
+        typo_frequency: bool = False,
+        llm_proofread: bool = False,
+        proofread_model: str | None = None,
+        proofread_workers: int = 4,
     ) -> AssembleOptions:
-        return cls(style=AssembleStyle(style), page_comments=page_comments)
+        return cls(
+            style=AssembleStyle(style),
+            page_comments=page_comments,
+            fix_typos=fix_typos,
+            typo_frequency=typo_frequency,
+            llm_proofread=llm_proofread,
+            proofread_model=proofread_model or cls.proofread_model,
+            proofread_workers=proofread_workers,
+        )

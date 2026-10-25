@@ -61,6 +61,7 @@ TYPE_MAP = {
 DROP_TYPES = frozenset({"Picture", "Figure", "FigureGroup", "PictureGroup"})
 
 HTML_TAG_RE = re.compile(r"</?[a-zA-Z][^>]*>")
+INLINE_TAG_RE = re.compile(r"</?(?:b|i|u|em|strong|span|a|s|mark|small|sub|code)\b[^>]*>", re.I)
 H_TAG_RE = re.compile(r"<h([1-6])")
 # Marker wraps LaTeX in <math> (not MathML). Strip tags *after* converting it
 # or the delimiters vanish and ``\Delta e`` ends up as prose.
@@ -268,6 +269,9 @@ def html_to_text(html: str) -> str:
     text = SUP_RE.sub(_sup_replacement, text)
     text = LI_RE.sub("\n- ", text)
     text = BR_RE.sub("\n", text)
+    # Inline emphasis carries no spacing of its own: "<b>자연어 처리</b>(NLP)"
+    # must not become "자연어 처리 (NLP )". Block-level tags still separate.
+    text = INLINE_TAG_RE.sub("", text)
     text = HTML_TAG_RE.sub(" ", text)
     text = unescape(text).replace("**", "")
     raw_lines = [re.sub(r"[^\S\n]+", " ", ln).strip() for ln in text.split("\n")]
@@ -364,6 +368,8 @@ HEADING_FULL_WIDTH_RATIO = 0.80
 HEADING_CENTER_TOLERANCE = 0.05
 ORNAMENT_RE = re.compile(r"^[\s•●▪■◆◇○∙·.…⋮*\-–—]+$")
 DIGITS_RE = re.compile(r"^\d{1,3}$")
+# A chapter opener set as a big bare number ("01" over the chapter title).
+CHAPTER_NUMBER_LABEL_RE = re.compile(r"^\d{1,2}$")
 PRE_RE = re.compile(r"\s*<pre\b", re.I)
 # Dotted section numbers at the start of a heading: "4.3 제목", "4.3.3.1 학습 단계".
 SECTION_NUMBER_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,2})+)\.?\s+\S")
@@ -502,7 +508,8 @@ def chunks_to_sections(
     geometry = _page_geometry(chunks)
     prev_type = ""
     pending_number = ""  # "4.8" seen on its own, waiting for its title
-    for chunk in chunks:
+    chapter_title_pending = False  # "01" label emitted; the next heading is the chapter title
+    for i, chunk in enumerate(chunks):
         block_type = str(chunk.get("block_type") or "")
         html = str(chunk.get("html") or "")
         # Figure data is kept even when the block's text is dropped.
@@ -516,6 +523,20 @@ def chunks_to_sections(
                 pending_number = bare
                 prev_type = block_type
                 continue
+            if CHAPTER_NUMBER_LABEL_RE.match(bare) and _opens_chapter(chunks, i, sections, geometry):
+                # "01" set large over the chapter title (either block may be
+                # tagged PageHeader by the layout model): the chapter label.
+                sections.append({"type": "title", "text": f"{int(bare)}장"})
+                chapter_title_pending = True
+                prev_type = block_type
+                continue
+            if chapter_title_pending and block_type == "PageHeader":
+                text = bare.replace("\n", " ")
+                sections.append({"type": "title", "text": text})
+                chapter_title_pending = False
+                prev_type = block_type
+                continue
+        chapter_title_pending = False
         if block_type in DROP_TYPES:
             prev_type = block_type
             continue
@@ -563,6 +584,52 @@ def chunks_to_sections(
             sections.append({"type": section_type, "text": text})
         prev_type = block_type
     return _demote_stray_chapter_labels(sections)
+
+
+#: A chapter number / title set in display type is at least this tall,
+#: relative to the page width (page numbers in the running head are ~0.03).
+CHAPTER_LABEL_MIN_HEIGHT_RATIO = 0.045
+
+
+def _is_display_size(chunk: dict, geometry: tuple[float, float] | None) -> bool | None:
+    """True/False when the block's height can be compared to the page width, None otherwise."""
+    bbox = chunk.get("bbox")
+    if not bbox or not geometry:
+        return None
+    _, width = geometry
+    return (float(bbox[3]) - float(bbox[1])) >= CHAPTER_LABEL_MIN_HEIGHT_RATIO * width
+
+
+def _opens_chapter(
+    chunks: list[dict],
+    i: int,
+    sections: list[dict[str, str]],
+    geometry: tuple[float, float] | None,
+) -> bool:
+    """True when the bare number at ``chunks[i]`` is a chapter label: set in
+    display size, leading the page (only running heads / figures before it),
+    with the chapter title — a heading, or another display-size block — next.
+    A page number in the running head is small and fails the size test."""
+    big = _is_display_size(chunks[i], geometry)
+    if big is False or (big is None and not H_TAG_RE.search(str(chunks[i].get("html") or ""))):
+        return False
+    if any(s["type"] not in ("header", "page_number", "figure") for s in sections):
+        return False
+    if i + 1 >= len(chunks):
+        return False
+    nxt_chunk = chunks[i + 1]
+    kind = nxt_chunk.get("block_type")
+    if kind == "PageHeader":
+        if not _is_display_size(nxt_chunk, geometry):
+            return False
+    elif kind != "SectionHeader":
+        return False
+    nxt = html_to_text(str(nxt_chunk.get("html") or "")).replace("\n", " ").strip()
+    if not nxt or DIGITS_RE.match(nxt) or ORNAMENT_RE.match(nxt):
+        return False
+    if SECTION_NUMBER_RE.match(nxt) or RUNNING_HEAD_RE.match(nxt) or TOC_ENTRY_RE.search(nxt):
+        return False
+    return True
 
 
 def _demote_stray_chapter_labels(sections: list[dict[str, str]]) -> list[dict[str, str]]:

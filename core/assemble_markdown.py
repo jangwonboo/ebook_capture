@@ -51,6 +51,42 @@ def assemble_markdown(
     _emit(progress, f"ASSEMBLE_LOAD pages={len(pages)} tmp={tmp_dir}")
     _emit(progress, f"ASSEMBLE_STYLE {opts.style.value}")
 
+    out = Path(output_md_path)
+
+    if opts.fix_ocr_typos:
+        from core.ocr_typo_fix import default_dictionary_paths, fix_ocr_typos, load_typo_dictionary
+
+        dictionary = load_typo_dictionary(default_dictionary_paths(out.parent))
+        result = fix_ocr_typos(pages, dictionary=dictionary, use_frequency=opts.typo_frequency)
+        pages = result.pages
+        report_path = out.with_name(f"{out.stem}_typo_fixes.txt")
+        report = result.report_text()
+        _emit(
+            progress,
+            f"ASSEMBLE_TYPOS fixed={result.total} words={len(result.records)} report={report_path}",
+        )
+        if opts.llm_proofread:
+            from core.llm_proofread import proofread_pages
+
+            proof = proofread_pages(
+                pages,
+                tmp_dir=tmp_dir,
+                title=title,
+                model=opts.proofread_model,
+                workers=opts.proofread_workers,
+                progress=progress,
+            )
+            pages = proof.pages
+            report += proof.report_text()
+            _emit(
+                progress,
+                f"PROOFREAD_DONE applied={len(proof.applied)} "
+                f"rejected={len(proof.fixes) - len(proof.applied)} {proof.usage.summary()}",
+            )
+            for err in proof.errors:
+                _emit(progress, f"PROOFREAD_ERROR {err}")
+        _atomic_write_text(report_path, report)
+
     if opts.fix_text:
         pages = normalize_paragraphs(pages)
         _emit(progress, "ASSEMBLE_FIX_TEXT reflow + paragraph merge")
@@ -67,7 +103,6 @@ def assemble_markdown(
         include_page_comments=opts.include_page_comments(),
         body_only=opts.body_only,
     )
-    out = Path(output_md_path)
     _atomic_write_text(out, markdown)
     _emit(progress, f"ASSEMBLE_MD_OK {out}")
 

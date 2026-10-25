@@ -186,10 +186,26 @@ def plan_job(cfg: CaptureConfig) -> tuple[list[PlannedStep], CaptureConfig]:
         ocr_source: str | None = None
         avail_png = consecutive_png_count_from_start(cfg)
 
-        # Prefer contiguous PNGs already on disk (even if config n_pages is larger).
-        # Fall back to book PDF, clamping to its length. Avoid failing validate()
-        # when config still says the full book page count.
-        if status["png_complete"]:
+        # An explicitly named --input-pdf / input_pdf wins: the user chose that
+        # source (usually the cropped book PDF) over whatever raw PNGs the
+        # capture left in tmp/. Otherwise prefer contiguous PNGs already on disk
+        # (even if config n_pages is larger), then the book's own PDF, clamping
+        # to its length so validate() does not fail on the configured page count.
+        explicit_pdf = bool(cfg.input_pdf.strip()) and Path(cfg.input_pdf).expanduser().is_file()
+        if explicit_pdf and pdf_path is not None:
+            from core.pdf_input import pdf_page_count
+
+            total = pdf_page_count(pdf_path)
+            max_pages = max(0, total - cfg.start_page + 1)
+            if cfg.n_pages <= 1 < max_pages:
+                # No page range given (config default is 1): the named PDF is the job.
+                print(f"NOTE: n_pages not set; using all {max_pages} pages of {pdf_path.name}", flush=True)
+                cfg.n_pages = max_pages
+            _clamp_n_pages(cfg, max_pages, f"PDF has {total} pages")
+            status = artifact_status(cfg)
+            ocr_source = "pdf"
+            cfg.input_pdf = str(pdf_path)
+        elif status["png_complete"]:
             ocr_source = "png"
         elif avail_png >= 1:
             _clamp_n_pages(

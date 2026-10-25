@@ -20,7 +20,7 @@ ebook-capture run [options]
 | **text** | `*.ocr.json` + `{title}.md` | Gemini OCR → Markdown |
 
 `--text`는 OCR과 Markdown 조립까지 한 번에 합니다.  
-소스 우선순위: 이미 있는 PNG → 책 PDF/`--input-pdf` → (없으면) 화면 캡처.
+소스 우선순위: `--input-pdf`(명시) → 이미 있는 PNG → 책 폴더의 PDF → (없으면) 화면 캡처.
 
 ---
 
@@ -95,8 +95,12 @@ python -m ebook_capture run --title Book --base-dir E:\ebook --text --input-pdf 
 | 절 번호 제목 | `4.3 제목` → `###`, `4.3.1 …`(그 이하) → `####`. 번호만 러닝 헤더로 떨어진 경우(`4.8` + 다음 제목) 붙여서 복원 |
 | `C O L U M N` 상자 라벨 | 버림(상자 제목만 `####`) |
 | 장 머리 | `N장` 라벨(위첨자 `<sup>장</sup>` 포함) + 다음 제목 → `## N장 제목`. 라벨만 있고 제목이 안 따르면(스크린샷 라벨) 본문 |
+| 숫자만 있는 장 머리 | 쪽 첫머리의 큰 숫자 제목(`01`) 바로 뒤에 일반 제목이 오면 `N장` 라벨로 보고 `## 1장 제목`으로 조립(마스터링 트랜스포머처럼 "장" 글자가 없는 책). 쪽 중간의 숫자나 뒤에 절 번호 제목이 오는 경우는 제외 |
+| 인라인 강조 | `<b>`/`<i>`/`<u>` 등은 공백 없이 제거(`<b>자연어 처리</b>(NLP)` → `자연어 처리(NLP)`); 블록 태그만 공백으로 바꿈 |
 | 목차 줄 | 끝에 쪽 번호가 붙은 제목(`1.1 인공지능이란? 016`)은 제목이 아니라 본문 |
 | 러닝 헤더 | 대문자 영문 러닝 헤더(`MACHINE LEARNING FOR …`)는 어떤 블록으로 오든 버림 |
+| OCR 오타 | 조립 전에 한글 어절을 사전으로 고침: `core/ocr_typo_fix.py`의 기본 항목 + 프로젝트 루트 `ocr_typos.txt` + 책 폴더 `ocr_typos.txt`(`틀린표기 -> 맞는표기`, 어절 앞부분에 매칭되어 조사는 따라옴, `!단어`는 보호). 수식·코드 스팬·그림/링크 경로와 code/equation/figure 섹션은 건드리지 않음. 바꾼 내역은 `{title}_typo_fixes.txt`에 남기고, `--no-typo-fix`로 끔. `--typo-freq`를 주면 책 안 빈도로도 추정(3음절 이상 어절 앞부분이 5회 이하로 드문데 헷갈리는 자모 하나만 바꾸면 5회 이상·3배 이상 잦은 어절이 되는 경우)하지만 `빅테이블→빅데이블`, `앉는다→않는다`처럼 멀쩡한 희귀 단어를 바꾸는 오탐이 많아 내역을 반드시 검토해야 함 |
+| LLM 교정 | `--proofread`: 쪽마다 산문 섹션(코드·수식·표·그림 제외)을 번호 붙여 Claude에 보내고 `{"fixes":[{"seg","from","to"}]}` 목록만 받음(출력이 짧아 비용은 거의 입력 토큰, 266쪽 약 $1). 적용 전 로컬 검증: `from`이 그 세그먼트에 정확히 한 번 있어야 하고, 길이 차 4 이하·유사도 0.5 이상(문장 고쳐 쓰기 차단), 한글이 들어간 교정만, 수식·코드 스팬 안은 제외. 적용/거부 내역 모두 `{title}_typo_fixes.txt`에 남김. 캐시 `tmp/{title}_NNNN.proof.json`(쪽 텍스트+모델 해시) |
 
 장 표시(`N장`/`Chapter N`)가 한 번도 없는 입력(책에서 한 장만 잘라 변환)은 "Front matter"가 아니라 제목이 `title`인 단일 장으로 조립됩니다.
 - Picture/Figure 블록의 글(모델이 지어낸 그림 설명)은 버립니다. 표는 HTML 그대로 `table` 섹션, 수식은 `$…$` / `$$…$$`로 남습니다. `blocks_raw`(유형+HTML+bbox)가 각 `.ocr.json`에 같이 저장됩니다.
@@ -252,6 +256,10 @@ python -m ebook_capture run --config default_config.jsonc --reader kindle_app --
 | `--ocr-engine google\|datalab` | OCR 백엔드 (기본 google = Gemini) |
 | `--datalab-mode fast\|balanced\|accurate` | Datalab 정확도 (기본 accurate) |
 | `--ocr-workers N` | OCR 동시 요청 수 (1-16, 기본 1) |
+| `--no-typo-fix` | 조립 시 OCR 오타 사전 보정 끄기. 기본은 켜짐, 내역은 `{title}_typo_fixes.txt` |
+| `--typo-freq` | 책 안 빈도로 오타 추정까지 적용(오탐 많음, 내역 검토 필수) |
+| `--proofread` | Claude로 쪽마다 OCR 오인 교정(유료, `ANTHROPIC_API_KEY`). 모델은 교정 목록만 돌려주고 로컬에서 검증 후 적용. `tmp/*.proof.json`에 캐시되어 재조립은 무료 |
+| `--proofread-model` | `--proofread` 모델 (기본 `claude-opus-5-5`) |
 | `--ocr-lang` | 예: `kor`, `eng` (Gemini만) |
 | `--ocr-prompt` / `--ocr-prompt-file` | Gemini 프롬프트 |
 | `--resume` / `--no-resume` | 완료 페이지 건너뛰기 |

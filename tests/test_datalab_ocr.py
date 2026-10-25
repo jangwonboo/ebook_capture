@@ -66,7 +66,7 @@ def test_chunk_type_mapping() -> None:
     assert [(s["type"], s["text"]) for s in sections] == [
         ("header", "권력중독"),
         ("title", "1장"),
-        ("section_title", "권력의 맛"),
+        ("title", "권력의 맛"),
         ("body", "본문 단락."),
         ("body", "where $c$ is light"),
         ("caption", "그림 1"),
@@ -132,6 +132,40 @@ def test_regular_table_becomes_pipe_table() -> None:
     spanned = "<table><tr><th colspan=\"2\">x</th></tr><tr><td>1</td><td><math>c</math></td></tr></table>"
     out = dl.table_text(spanned)
     assert out.startswith("<table>") and "$c$" in out
+
+
+def test_chapter_label_with_sup_and_wide_title() -> None:
+    # "1장" arrives as 1<sup>장</sup>; the title under it spans the page width.
+    chunks = [
+        {"block_type": "SectionHeader", "html": "<h1>1<sup>장</sup></h1>", "bbox": [284, 229, 431, 401]},
+        {"block_type": "SectionHeader", "html": "<h1>인공지능과 머신 러닝</h1>", "bbox": [270, 456, 705, 685]},
+        {"block_type": "Text", "html": "<p>본문 끝에 각주 표식.<sup>3</sup></p>", "bbox": [266, 895, 705, 1067]},
+    ]
+    assert dl.chunks_to_sections(chunks) == [
+        {"type": "title", "text": "1장"},
+        {"type": "title", "text": "인공지능과 머신 러닝"},
+        {"type": "body", "text": "본문 끝에 각주 표식."},
+    ]
+
+
+def test_front_matter_headings_are_not_chapters() -> None:
+    # TOC lines end with a page number; a "N장" label without a title after it
+    # is a picture label; an all-caps running head tagged as heading is a header.
+    chunks = [
+        {"block_type": "SectionHeader", "html": "<h2>1장 인공지능과 머신 러닝 ..... 015</h2>", "bbox": [100, 100, 700, 130]},
+        {"block_type": "SectionHeader", "html": "<h2>1.1 인공지능이란? 016</h2>", "bbox": [100, 140, 700, 170]},
+        {"block_type": "SectionHeader", "html": "<h1>4장</h1>", "bbox": [100, 200, 200, 260]},
+        {"block_type": "Picture", "html": "", "bbox": [100, 270, 700, 600]},
+        {"block_type": "SectionHeader", "html": "<h2>3.3</h2>", "bbox": [211, 992, 309, 1058]},
+        {"block_type": "SectionHeader", "html": "<h2>MACHINE LEARNING FOR DATA ANALYSIS</h2>", "bbox": [673, 986, 1137, 1008]},
+    ]
+    secs = dl.chunks_to_sections(chunks)
+    assert secs == [
+        {"type": "body", "text": "1장 인공지능과 머신 러닝 ..... 015"},
+        {"type": "body", "text": "1.1 인공지능이란? 016"},
+        {"type": "body", "text": "4장"},
+        {"type": "header", "text": "MACHINE LEARNING FOR DATA ANALYSIS"},
+    ]
 
 
 def test_bare_section_number_is_glued_to_next_heading() -> None:

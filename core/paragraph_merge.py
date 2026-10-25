@@ -68,6 +68,19 @@ def paragraph_ends(text: str) -> bool:
     return False
 
 
+_LIST_ITEM_RE = re.compile(r"^(?:[-•·∙●○◦]\s|\d{1,3}[.)]\s)")
+
+
+def is_list_item(text: str) -> bool:
+    """A Markdown list line ("- 항목", "3. 항목") — a hard line break on both sides."""
+    return bool(_LIST_ITEM_RE.match(text.strip()))
+
+
+def _ends_with_list_item(text: str) -> bool:
+    lines = [ln for ln in text.strip().splitlines() if ln.strip()]
+    return bool(lines) and is_list_item(lines[-1])
+
+
 def looks_like_new_paragraph(text: str) -> bool:
     """True when text clearly starts a new block (list item, diagram label, etc.)."""
     stripped = text.strip()
@@ -128,6 +141,8 @@ def _should_merge_bodies(prev: SectionBlock, nxt: SectionBlock) -> bool:
         return False
     if looks_like_new_paragraph(nxt.text):
         return False
+    if _ends_with_list_item(prev.text):
+        return False  # a list block does not continue into the next paragraph
     if _both_short(prev, nxt):
         return False
     return True

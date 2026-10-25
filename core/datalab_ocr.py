@@ -80,6 +80,12 @@ LI_RE = re.compile(r"<li\b[^>]*>", re.I)
 BR_RE = re.compile(r"<br\s*/?>|</p>|</div>|</tr>", re.I)
 IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.I)
 SUP_RE = re.compile(r"<sup\b[^>]*>(.*?)</sup>", re.I | re.S)
+FOOTNOTE_MARK_RE = re.compile(r"^[\d\s,*†‡§¶\[\]()a-z]*$", re.I)
+
+
+def _sup_replacement(m: re.Match) -> str:
+    inner = HTML_TAG_RE.sub("", m.group(1)).strip()
+    return "" if FOOTNOTE_MARK_RE.match(inner) else inner
 
 
 class DatalabError(RuntimeError):
@@ -227,7 +233,8 @@ def read_bytes(
 
 # ── chunks → sections ─────────────────────────────────────────────────────
 LIST_BULLET_RE = re.compile(r"^- [•●▪■◆◇○∙·◦\-–—]+\s*")
-LIST_ORDERED_RE = re.compile(r"^- (\d{1,3})(?:[.)]\s*|\s+)(?=\S)")
+# "- 1. 항목" / "- 1) 항목" / "- 1 항목" — but not "- 1.1 제목" (a section number).
+LIST_ORDERED_RE = re.compile(r"^- (\d{1,3})(?:[.)]\s*|\s+)(?=\S)(?!\d)")
 
 
 def _normalize_list_line(line: str) -> str:
@@ -254,9 +261,11 @@ def html_to_text(html: str) -> str:
 
     text = MATH_RE.sub(keep_math, html)
     text = IMG_TAG_RE.sub("", text)
-    # Footnote reference numbers (<sup>3</sup>) are dropped: the reader-side
-    # superscript has no anchor in Markdown and only litters sentence ends.
-    text = SUP_RE.sub("", text)
+    # Footnote reference marks (<sup>3</sup>, <sup>*</sup>) are dropped: the
+    # reader-side superscript has no anchor in Markdown and only litters
+    # sentence ends. Word superscripts stay: a chapter opener's "1장" arrives
+    # as <h1>1<sup>장</sup></h1>.
+    text = SUP_RE.sub(_sup_replacement, text)
     text = LI_RE.sub("\n- ", text)
     text = BR_RE.sub("\n", text)
     text = HTML_TAG_RE.sub(" ", text)
@@ -362,6 +371,11 @@ SECTION_NUMBER_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,2})+)\.?\s+\S")
 # in the next SectionHeader): glued to that title.
 BARE_SECTION_NUMBER_RE = re.compile(r"^\d{1,2}(?:\.\d{1,2})+$")
 COLUMN_LABEL_RE = re.compile(r"^\s*C\s*O\s*L\s*U\s*M\s*N\s*$", re.I)
+# Running head set in capitals ("MACHINE LEARNING FOR DATA ANALYSIS") that
+# Marker sometimes tags as a SectionHeader instead of a PageHeader.
+RUNNING_HEAD_RE = re.compile(r"^[A-Z][A-Z0-9 ,.:&'-]{8,}$")
+# A table-of-contents line: heading text followed by its page number.
+TOC_ENTRY_RE = re.compile(r"(?:\.{2,}|…+)\s*\d{1,3}$|\s\d{2,3}$")
 # Marker glyphs printed before captions ("♥ 그림 4-12 …", "▼ 표 4-1 …").
 CAPTION_MARK_RE = re.compile(r"^[♥♡▼▽▾▸▶►◆◇■□●○✔✓]+\s*")
 # "3. 정서적 결핍: ..." — a numbered list item set in display type.
@@ -399,6 +413,10 @@ def classify_heading(
         return None
     if COLUMN_LABEL_RE.match(text):
         return None  # "C O L U M N" box label: a design element, the box title follows
+    if RUNNING_HEAD_RE.match(text):
+        return "header"
+    if TOC_ENTRY_RE.search(text) and not chapter_marker_in_text(text):
+        return "body"  # "1.1 인공지능이란? 016": a contents line, not a heading
     if chapter_marker_in_text(text):
         return "title"
     m = SECTION_NUMBER_RE.match(text)
@@ -478,6 +496,8 @@ def chunks_to_sections(
     chunks: list[dict], assets_dir: Path | None = None
 ) -> list[dict[str, str]]:
     """Map Datalab chunks onto this repo's OCR section list."""
+    from core.section_normalize import chapter_marker_in_text
+
     sections: list[dict[str, str]] = []
     geometry = _page_geometry(chunks)
     prev_type = ""
@@ -502,6 +522,10 @@ def chunks_to_sections(
         if block_type == "SectionHeader":
             text = html_to_text(html).replace("\n", " ").strip()
             text = re.sub(r"^[•●▪■◆◇○\-–—]+\s*", "", text)
+            if RUNNING_HEAD_RE.match(text):
+                sections.append({"type": "header", "text": text})
+                prev_type = block_type
+                continue  # the pending section number waits for the real title
             if pending_number and not SECTION_NUMBER_RE.match(text):
                 text = f"{pending_number} {text}"
             pending_number = ""
@@ -510,12 +534,21 @@ def chunks_to_sections(
                 after_figure=prev_type in DROP_TYPES or bool(chunk.get("images")),
             )
             if kind is not None:
+                if (
+                    kind != "title"
+                    and sections
+                    and sections[-1]["type"] == "title"
+                    and chapter_marker_in_text(sections[-1]["text"])
+                ):
+                    kind = "title"  # the heading right after a "N장" label is the chapter title
                 sections.append({"type": kind, "text": text})
             prev_type = block_type
             continue
         section_type = TYPE_MAP.get(block_type, "body")
         if section_type == "body" and PRE_RE.match(html):
             section_type = "code"  # code listings arrive as Text wrapped in <pre>
+        elif section_type == "body" and RUNNING_HEAD_RE.match(html_to_text(html).strip()):
+            section_type = "header"  # running head tagged as Text
         if section_type == "table":
             text = table_text(html)
         elif section_type == "equation":
@@ -529,7 +562,25 @@ def chunks_to_sections(
         if text and not (section_type == "body" and ORNAMENT_RE.match(text)):
             sections.append({"type": section_type, "text": text})
         prev_type = block_type
-    return sections
+    return _demote_stray_chapter_labels(sections)
+
+
+def _demote_stray_chapter_labels(sections: list[dict[str, str]]) -> list[dict[str, str]]:
+    """A bare "N장" title is a chapter opener only when the chapter title
+    follows it. On its own (a screenshot label in the front matter, a cross
+    reference set large) it is plain text."""
+    from core.section_normalize import chapter_marker_in_text
+
+    out = list(sections)
+    for i, sec in enumerate(out):
+        if sec["type"] != "title" or not chapter_marker_in_text(sec["text"]):
+            continue
+        nxt = out[i + 1] if i + 1 < len(out) else None
+        # Last block on the page: the title may sit on the next page (a label
+        # alone on a part-opening page), so it is left as it is.
+        if nxt is not None and nxt["type"] != "title":
+            out[i] = {"type": "body", "text": sec["text"]}
+    return out
 
 
 def rebuild_page_structure(page: dict[str, Any]) -> dict[str, Any]:

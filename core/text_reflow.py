@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from core.ocr_json_loader import SectionBlock
-from core.paragraph_merge import looks_like_new_paragraph, paragraph_ends
+from core.paragraph_merge import is_list_item, looks_like_new_paragraph, paragraph_ends
 
 _HANGUL = re.compile(r"[가-힣]")
 _BLANK_LINES = re.compile(r"\n\s*\n+")
@@ -90,7 +90,9 @@ def reflow_body_text(text: str) -> str:
             continue
         merged = lines[0]
         for line in lines[1:]:
-            if paragraph_ends(merged) and looks_like_new_paragraph(line):
+            # A list item always starts its own line: "- 1.1 머신 러닝이란?" must
+            # not be glued to the item before it even when that one has no period.
+            if is_list_item(line) or (paragraph_ends(merged) and looks_like_new_paragraph(line)):
                 reflowed.append(merged)
                 merged = line
             else:

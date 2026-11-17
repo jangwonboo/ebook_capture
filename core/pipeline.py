@@ -895,7 +895,7 @@ def _collect_combined_ocr_parts(cfg: CaptureConfig) -> list[str]:
 
 def _ocr_page_runner(cfg: CaptureConfig, pdf_path: Path | None):
     """Return (engine label, fn(page_num) -> structure, spend-or-None)."""
-    from core.config import OCR_ENGINE_DATALAB
+    from core.config import OCR_ENGINE_ANTHROPIC, OCR_ENGINE_DATALAB
 
     if cfg.ocr_engine == OCR_ENGINE_DATALAB:
         from core import datalab_ocr
@@ -924,6 +924,26 @@ def _ocr_page_runner(cfg: CaptureConfig, pdf_path: Path | None):
             )
 
         return label, run, spend
+
+    if cfg.ocr_engine == OCR_ENGINE_ANTHROPIC:
+        from core.anthropic_ocr import extract_page_structure_from_image
+
+        def run_anthropic(page_num: int) -> dict[str, Any]:
+            if pdf_path is not None:
+                raise RuntimeError(
+                    "Anthropic OCR currently accepts captured PNG/JPEG pages; "
+                    "use the Google engine for --input-pdf."
+                )
+            return extract_page_structure_from_image(
+                cfg.page_png_path(page_num),
+                page_num=page_num,
+                lang_hint=cfg.ocr_lang,
+                prompt=cfg.ocr_text_prompt,
+                prompt_file=cfg.resolved_ocr_prompt_file(),
+                model=cfg.anthropic_ocr_model,
+            )
+
+        return f"Anthropic Claude Vision ({cfg.anthropic_ocr_model})", run_anthropic, None
 
     from core.google_ocr import (
         extract_page_structure_from_image,
@@ -1026,7 +1046,7 @@ def _run_phase_ocr(
             except (RuntimeError, ValueError) as exc:
                 fail(page_num, exc)
                 if cfg.ocr_engine != "datalab":
-                    break  # Gemini failures are usually global (key, quota)
+                    break  # Hosted OCR failures are usually global (key, quota)
     else:
         _emit(progress, f"OCR_WORKERS {workers} pages={len(pending)}")
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -1087,19 +1107,25 @@ def _run_phase_pdf(
             f"chrome=(top {outline.chrome_top:.4f}, bottom {outline.chrome_bottom:.4f}) "
             f"trim={trim.as_dict()}",
         )
-        # Per-page PDFs built under a different crop must not be reused.
-        crop_key = trim.as_dict()
-        if state.get("pdf_crop") != crop_key:
-            if state.get("phases", {}).get(PHASE_PDF):
-                _emit(progress, "PDF_AUTO_CROP crop changed; rebuilding page PDFs")
-            state.setdefault("phases", {})[PHASE_PDF] = {}
-            state["pdf_crop"] = crop_key
-            _save_state(cfg, state)
+        state["pdf_crop"] = trim.as_dict()
     if trim.is_active():
         _emit(progress, f"PDF_TRIM {trim.as_dict()}")
     page_aspect = pdf_device_aspect(cfg.pdf_device)
+    render_key = {
+        "crop": trim.as_dict(),
+        "page_aspect": page_aspect,
+        "page_margin": cfg.pdf_page_margin,
+    }
+    if state.get("pdf_render_settings") != render_key:
+        if state.get("phases", {}).get(PHASE_PDF):
+            _emit(progress, "PDF render settings changed; rebuilding page PDFs")
+        state.setdefault("phases", {})[PHASE_PDF] = {}
+        state["pdf_render_settings"] = render_key
+        _save_state(cfg, state)
     if page_aspect > 0.0:
         _emit(progress, f"PDF_DEVICE {cfg.pdf_device} aspect={page_aspect:.4f}")
+    if cfg.pdf_page_margin > 0.0:
+        _emit(progress, f"PDF_PAGE_MARGIN ratio={cfg.pdf_page_margin:.4f}")
     page_pdfs: list[Path] = []
     try:
         for page_num in cfg.page_numbers(n_run):
@@ -1120,7 +1146,13 @@ def _run_phase_pdf(
                 continue
             try:
                 part = _part_path(page_pdf)
-                build_page_image_pdf(png, part, trim=trim, page_aspect=page_aspect)
+                build_page_image_pdf(
+                    png,
+                    part,
+                    trim=trim,
+                    page_aspect=page_aspect,
+                    page_margin=cfg.pdf_page_margin,
+                )
                 os.replace(part, page_pdf)
                 if not _valid_pdf(page_pdf):
                     raise RuntimeError(f"Generated invalid PDF page: {page_pdf}")

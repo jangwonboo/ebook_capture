@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 from core.config import PdfTrim
-from core.image_pdf import build_page_image_pdf, crop_image_by_trim_ratios
+from core.image_pdf import build_page_image_pdf, crop_image_by_trim_ratios, pad_image_with_margin
 
 
 def test_crop_image_by_trim_ratios() -> None:
@@ -16,6 +16,14 @@ def test_crop_image_by_trim_ratios() -> None:
         img, PdfTrim(left=0.1, right=0.1, top=0.05, bottom=0.05)
     )
     assert trimmed.size == (800, 1800)
+
+
+def test_pad_image_with_margin_adds_all_four_sides() -> None:
+    img = Image.new("RGB", (100, 200), color=(10, 20, 30))
+    padded = pad_image_with_margin(img, 0.04)
+    assert padded.size == (108, 216)
+    assert padded.getpixel((0, 0)) == (255, 255, 255)
+    assert padded.getpixel((4, 8)) == (10, 20, 30)
 
 
 def test_fill_top_whitens_toolbar_without_shrinking_height() -> None:

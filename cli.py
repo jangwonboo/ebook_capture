@@ -123,9 +123,15 @@ def _add_run_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--ocr-engine",
         dest="ocr_engine",
-        choices=["google", "datalab"],
+        choices=["google", "anthropic", "datalab"],
         default=argparse.SUPPRESS,
-        help="OCR backend for --text: google (Gemini) or datalab (hosted Marker).",
+        help="OCR backend for --text: google (Gemini), anthropic (Claude Vision), or datalab (Marker).",
+    )
+    parser.add_argument(
+        "--anthropic-ocr-model",
+        dest="anthropic_ocr_model",
+        default=argparse.SUPPRESS,
+        help="Claude Vision model for --ocr-engine anthropic (default: claude-haiku-4-5-20251001).",
     )
     parser.add_argument(
         "--datalab-mode",
@@ -172,6 +178,14 @@ def _add_run_options(parser: argparse.ArgumentParser) -> None:
         default=argparse.SUPPRESS,
         metavar="RATIO",
         help="Grow the detected outline by this fraction of width/height on each side (0-0.2).",
+    )
+    parser.add_argument(
+        "--pdf-page-margin",
+        dest="pdf_page_margin",
+        type=float,
+        default=argparse.SUPPRESS,
+        metavar="RATIO",
+        help="Add white PDF margin on all four sides, as a fraction of page width/height (0-0.2).",
     )
     parser.add_argument(
         "--force-phase",
@@ -408,6 +422,8 @@ def _apply_args(cfg: CaptureConfig, args: argparse.Namespace) -> CaptureConfig:
         cfg.ocr_prompt_file = str(args.ocr_prompt_file or "")
     if hasattr(args, "ocr_engine"):
         cfg.ocr_engine = str(args.ocr_engine)
+    if hasattr(args, "anthropic_ocr_model"):
+        cfg.anthropic_ocr_model = str(args.anthropic_ocr_model)
     if hasattr(args, "datalab_mode"):
         cfg.datalab_mode = str(args.datalab_mode)
     if hasattr(args, "ocr_workers"):
@@ -420,6 +436,8 @@ def _apply_args(cfg: CaptureConfig, args: argparse.Namespace) -> CaptureConfig:
         cfg.pdf_auto_crop = bool(args.pdf_auto_crop)
     if hasattr(args, "pdf_auto_crop_margin"):
         cfg.pdf_auto_crop_margin = float(args.pdf_auto_crop_margin)
+    if hasattr(args, "pdf_page_margin"):
+        cfg.pdf_page_margin = float(args.pdf_page_margin)
     if getattr(args, "window_frame", False):
         cfg.use_window_client_rect = False
     if getattr(args, "window_match_first", False):

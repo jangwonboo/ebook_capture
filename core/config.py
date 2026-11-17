@@ -56,7 +56,8 @@ PHASE_CAPTURE = "capture"
 PHASE_OCR = "ocr"
 OCR_ENGINE_GOOGLE = "google"
 OCR_ENGINE_DATALAB = "datalab"
-OCR_ENGINES = frozenset({OCR_ENGINE_GOOGLE, OCR_ENGINE_DATALAB})
+OCR_ENGINE_ANTHROPIC = "anthropic"
+OCR_ENGINES = frozenset({OCR_ENGINE_GOOGLE, OCR_ENGINE_DATALAB, OCR_ENGINE_ANTHROPIC})
 DATALAB_MODES = ("fast", "balanced", "accurate")
 PHASE_PDF = "pdf"
 PHASE_ALL = "all"
@@ -315,6 +316,9 @@ class CaptureConfig:
     pdf_auto_crop: bool = False
     # Extra margin kept around the detected outline, as a ratio of width/height.
     pdf_auto_crop_margin: float = 0.0
+    # White margin added around every PDF page after cropping, as a ratio of the
+    # cropped page width/height on each side.
+    pdf_page_margin: float = 0.0
     # Pad each PDF page with white margins to this device's screen aspect ratio
     # ("kindle_scribe" | "kindle_colorsoft" | "" = off). See PDF_DEVICE_PRESETS.
     pdf_device: str = ""
@@ -340,9 +344,10 @@ class CaptureConfig:
     ocr_lang: str = "eng"
     ocr_text_prompt: str = ""
     ocr_prompt_file: str = ""
-    # OCR backend for --text: "google" (Gemini, prompt-driven JSON) or
-    # "datalab" (hosted Marker; typed layout chunks, DATALAB_API_KEY).
+    # OCR backend for --text: Google Gemini, Anthropic Claude Vision, or
+    # Datalab Marker.
     ocr_engine: str = OCR_ENGINE_GOOGLE
+    anthropic_ocr_model: str = "claude-haiku-4-5-20251001"
     # Datalab mode. "fast" scrapes the text layer and misses inline math.
     datalab_mode: str = "accurate"
     # Concurrent page requests during the OCR phase (1 = sequential). Datalab
@@ -374,9 +379,11 @@ class CaptureConfig:
         self.capture_mode = self.capture_mode.strip()
         self.assemble_style = self.assemble_style.strip().lower()
         self.ocr_engine = self.ocr_engine.strip().lower() or OCR_ENGINE_GOOGLE
+        self.anthropic_ocr_model = self.anthropic_ocr_model.strip() or "claude-haiku-4-5-20251001"
         self.datalab_mode = self.datalab_mode.strip().lower() or "accurate"
         self.key_delivery = normalize_key_delivery(self.key_delivery)
         self.pdf_device = self.pdf_device.strip().lower()
+        self.pdf_page_margin = float(self.pdf_page_margin)
         self.capture_scale = float(self.capture_scale)
         self.capture_monitor = int(self.capture_monitor)
         self.start_focus_x_ratio = float(self.start_focus_x_ratio)
@@ -481,7 +488,7 @@ class CaptureConfig:
         if self.assemble_style not in {"full", "prose", "raw"}:
             raise ValueError("assemble_style must be one of: full, prose, raw")
         if self.ocr_engine not in OCR_ENGINES:
-            raise ValueError("ocr_engine must be one of: google, datalab")
+            raise ValueError("ocr_engine must be one of: anthropic, datalab, google")
         if self.datalab_mode not in DATALAB_MODES:
             raise ValueError("datalab_mode must be one of: fast, balanced, accurate")
         if self.ocr_workers < 1 or self.ocr_workers > 16:
@@ -555,6 +562,8 @@ class CaptureConfig:
             raise ValueError("stop_repeat_tolerance must be between 0.0 and 50.0")
         if self.pdf_auto_crop_margin < 0.0 or self.pdf_auto_crop_margin > 0.2:
             raise ValueError("pdf_auto_crop_margin must be between 0.0 and 0.2")
+        if self.pdf_page_margin < 0.0 or self.pdf_page_margin > 0.2:
+            raise ValueError("pdf_page_margin must be between 0.0 and 0.2")
         if self.settle_stable_sec < 0.0 or self.settle_stable_sec > 5.0:
             raise ValueError("settle_stable_sec must be between 0.0 and 5.0")
         if self.settle_max_sec < 0.0 or self.settle_max_sec > 60.0:
@@ -617,6 +626,7 @@ class CaptureConfig:
             pdf_trim=pdf_trim_from_mapping(data),
             pdf_auto_crop=bool(data.get("pdf_auto_crop", False)),
             pdf_auto_crop_margin=float(data.get("pdf_auto_crop_margin", 0.0)),
+            pdf_page_margin=float(data.get("pdf_page_margin", 0.0)),
             pdf_device=str(data.get("pdf_device", "")),
             keep_pointer_outside=bool(data.get("keep_pointer_outside", False)),
             settle_stable_sec=float(data.get("settle_stable_sec", 0.0)),
@@ -631,6 +641,7 @@ class CaptureConfig:
             ocr_text_prompt=str(data.get("ocr_text_prompt", "")),
             ocr_prompt_file=str(data.get("ocr_prompt_file", "")),
             ocr_engine=str(data.get("ocr_engine", OCR_ENGINE_GOOGLE)),
+            anthropic_ocr_model=str(data.get("anthropic_ocr_model", "claude-haiku-4-5-20251001")),
             datalab_mode=str(data.get("datalab_mode", "accurate")),
             ocr_workers=int(data.get("ocr_workers", 1)),
             assemble_style=str(data.get("assemble_style", DEFAULT_ASSEMBLE_STYLE)),

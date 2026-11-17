@@ -324,6 +324,25 @@ def test_config_ocr_engine_fields() -> None:
         raise AssertionError("expected ValueError")
 
 
+def test_anthropic_ocr_config_and_cli() -> None:
+    from cli import _build_parser
+
+    cfg = CaptureConfig.from_mapping(
+        {
+            "ocr_engine": "Anthropic",
+            "anthropic_ocr_model": "claude-haiku-4-5-20251001",
+            "skip_capture": True,
+        }
+    )
+    cfg.validate()
+    assert cfg.ocr_engine == "anthropic"
+    assert cfg.anthropic_ocr_model == "claude-haiku-4-5-20251001"
+    args = _build_parser().parse_args(
+        ["run", "--title", "B", "--base-dir", "E:/x", "--text", "--ocr-engine", "anthropic"]
+    )
+    assert args.ocr_engine == "anthropic"
+
+
 def test_cli_parses_engine_flags() -> None:
     from cli import _build_parser
 

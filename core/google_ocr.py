@@ -63,6 +63,53 @@ def resolve_ocr_prompt(
     )
 
 
+def _repair_json_strings(text: str) -> str:
+    """Escape bare double quotes and raw line breaks inside JSON string values.
+
+    Vision models sometimes copy a page's quotation marks straight into the
+    JSON (``"text": "그는 "안녕"이라고 말했다"``). A quote inside a string is
+    treated as the closing quote only when the next non-blank character is
+    structural (``, : ] }``) or the end of input; any other quote is escaped.
+    """
+    out: list[str] = []
+    in_str = False
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if not in_str:
+            if ch == '"':
+                in_str = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "\\":
+            out.append(text[i : i + 2])
+            i += 2
+            continue
+        if ch == '"':
+            j = i + 1
+            while j < n and text[j] in " \t\r\n":
+                j += 1
+            if j >= n or text[j] in ",:]}":
+                in_str = False
+                out.append(ch)
+            else:
+                out.append('\\"')
+            i += 1
+            continue
+        if ch == "\n":
+            out.append("\\n")
+        elif ch == "\r":
+            pass
+        elif ch == "\t":
+            out.append("\\t")
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _extract_json_object(text: str) -> dict[str, Any]:
     cleaned = (text or "").strip()
     if cleaned.startswith("```"):
@@ -75,7 +122,12 @@ def _extract_json_object(text: str) -> dict[str, Any]:
         end = cleaned.rfind("}")
         if start < 0 or end <= start:
             raise RuntimeError("Google OCR response did not contain JSON")
-        raw = json.loads(cleaned[start : end + 1])
+        body = cleaned[start : end + 1]
+        try:
+            raw = json.loads(body)
+        except json.JSONDecodeError:
+            # Last resort: bare quotes / raw newlines inside string values.
+            raw = json.loads(_repair_json_strings(body))
     if not isinstance(raw, dict):
         raise RuntimeError("Google OCR response must be a JSON object")
     return raw

@@ -247,3 +247,10 @@ python -m ebook_capture run --config default_config.jsonc --reader kindle_app --
 - 남은 흠: 마지막 PNG(0233)는 `마지막 페이지입니다` 대화상자가 판권면 하단 여백 위에 겹쳐 있다. 본문 내용은 가려지지 않았다.
 - 미해결(보류): 물리 키보드로는 넘김이 되는데 주입 키(pyautogui·SendInput, VK/스캔코드 조합 전부)는 뷰어 페이지가 무시한다. Ctrl+F는 Chrome UI에 닿으므로 OS→Chrome 경로는 정상. top 프레임 콘솔 `keydown` 리스너에는 아무것도 안 찍혔고, `max.aladin.co.kr` iframe 컨텍스트 결과는 확인 전. 후보는 (1) 이 PC의 키보드 보안 모듈(nProtect Online Security·INITECH·Softcamp) 저수준 훅의 주입 키 필터, (2) 뷰어 스크립트의 포커스 요소 조건. 휠 넘김으로 우회했으므로 캡처에는 영향 없음.
 - 테스트: 176 통과. `test_apply_kindle_app_profile`, `test_apply_rdp_full_profile` 2건은 이 세션 전부터 작업 중이던 `pdf_trim` fill_left/fill_right 변경(`core/config.py`, `reader_profiles.jsonc`)과 어긋나 실패한다. 테스트 기대값을 새 fill 필드에 맞춰야 한다.
+
+### OCR → Markdown (2026-11-24 19:36)
+
+- 명령: `python -m ebook_capture run --config tmp/wit_book_config.json --text --ocr-engine anthropic --ocr-workers 4 --style full -y` (Claude Vision haiku-4-5, 4 동시 요청).
+- 결과: `D:\ebook\비트겐슈타인\비트겐슈타인.md` (233쪽, 장 6개, h2 7 / h3 164), `*.ocr.json` 233개, `_ocr.txt`, `_structure.json`, `_typo_fixes.txt`(교정 0).
+- 첫 실행에서 6쪽(77, 98, 132, 179, 201, 203)이 `Expecting ',' delimiter` JSON 파싱 오류로 실패. 모델이 본문의 큰따옴표를 이스케이프 없이 JSON 문자열 안에 그대로 넣은 것이 원인이고, 98·132쪽은 재시도해도 같은 위치에서 반복됐다.
+- 조치: `google_ocr._extract_json_object`에 마지막 단계 복구(`_repair_json_strings`: 문자열 안의 맨 큰따옴표·원시 줄바꿈 이스케이프)를 넣고, `anthropic_ocr`는 `JSONDecodeError`도 재시도 대상으로 바꿨다. 회귀 테스트 `test_extract_json_object_repairs_bare_quotes_and_newlines`. 그 뒤 `--text` 재실행으로 남은 쪽이 모두 통과했다.

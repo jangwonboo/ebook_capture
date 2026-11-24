@@ -76,3 +76,19 @@ def test_resolve_ocr_prompt_uses_bundled_default(repo_root) -> None:
     prompt = resolve_ocr_prompt(lang_hint="eng", page_num=1)
     assert len(prompt) > 100
     assert "eng" in prompt
+
+
+def test_extract_json_object_repairs_bare_quotes_and_newlines() -> None:
+    """Vision models copy page quotation marks into JSON unescaped (p.98/132, 2026-11-24)."""
+    from core.google_ocr import _extract_json_object
+
+    bad = (
+        '{\n "page": 98,\n "sections": [\n'
+        '  {"type": "body", "text": "그는 "안녕"이라고 말했다. 줄\n바꿈"},\n'
+        '  {"type": "caption", "text": "ok"}\n ]\n}'
+    )
+    result = _extract_json_object(bad)
+    assert result["sections"][0]["text"] == '그는 "안녕"이라고 말했다. 줄\n바꿈'
+    assert result["sections"][1]["text"] == "ok"
+    # Properly escaped input is left alone.
+    assert _extract_json_object('{"a": "x\\"y", "b": ["p", "q"]}') == {"a": 'x"y', "b": ["p", "q"]}

@@ -446,6 +446,8 @@ def outline_to_trim(outline: PageOutline, base: PdfTrim | None = None) -> PdfTri
             bottom=base.bottom,
             fill_top=base.fill_top,
             fill_bottom=base.fill_bottom,
+            fill_left=base.fill_left,
+            fill_right=base.fill_right,
         )
 
     def _edge(v: float) -> float:
@@ -458,6 +460,8 @@ def outline_to_trim(outline: PageOutline, base: PdfTrim | None = None) -> PdfTri
         bottom=_edge(1.0 - outline.bottom),
         fill_top=base.fill_top,
         fill_bottom=base.fill_bottom,
+        fill_left=base.fill_left,
+        fill_right=base.fill_right,
     )
     trim.validate()
     return trim

@@ -180,10 +180,16 @@ def _same_page(cfg: CaptureConfig, prev: Any, cur: Any) -> tuple[bool, float]:
 
 def _send_page_turn_key(cfg: CaptureConfig, progress: ProgressFn | None) -> None:
     """Activate target window and send next_key (focus clicks happen pre-capture)."""
-    if cfg.capture_mode == CAPTURE_MANUAL:
-        pyautogui.press(cfg.next_key)
-        return
     from core import windows_util as wu
+
+    if cfg.capture_mode == CAPTURE_MANUAL:
+        notches = wu.wheel_notches_for_key(cfg.next_key)
+        if notches:
+            l, t, w, h = cfg.rect.as_tuple()
+            pyautogui.scroll(notches, l + w // 2, t + h // 2)
+        else:
+            pyautogui.press(cfg.next_key)
+        return
 
     left, top, w, h = _screen_region(cfg)
     before = _region_fingerprint(left, top, w, h) if cfg.debug_capture else None
@@ -1196,7 +1202,13 @@ def run_capture(
     cfg.tmp_dir().mkdir(parents=True, exist_ok=True)
     state = _load_state(cfg)
     # A previous run may have detected the end of the book before n_pages.
+    # --no-resume restarts the capture from scratch, so a stale (possibly
+    # wrong) end-of-book mark must not clamp the new run.
     eob = state.get("end_of_book_last_page")
+    if not cfg.resume and eob is not None:
+        state.pop("end_of_book_last_page", None)
+        _emit(progress, f"CAPTURE_END_OF_BOOK_RESET ignored stale last page#{eob} (no-resume)")
+        eob = None
     if isinstance(eob, int) and eob >= cfg.start_page:
         clamped = eob - cfg.start_page + 1
         if clamped < n_run:

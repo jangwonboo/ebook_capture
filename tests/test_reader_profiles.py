@@ -82,8 +82,11 @@ def test_all_profiles_share_proven_capture_loop() -> None:
         cfg = CaptureConfig(title="t", base_dir="/x")
         apply_reader_profile(cfg, name)
         assert cfg.capture_mode == "screen_left_third"
-        # kindle_app avoids in-page links entirely (API foreground, no clicks).
-        assert cfg.reader_focus_clicks == (0 if name == "kindle_app" else 2)
+        # kindle_app avoids in-page links entirely (API foreground, no clicks);
+        # aladin_web: a page click toggles the viewer menu overlay (wheel turns).
+        assert cfg.reader_focus_clicks == (
+            0 if name in ("kindle_app", "aladin_web") else 2
+        )
         assert cfg.reader_focus_x_ratio == 0.5
         assert cfg.reader_focus_y_ratio == (0.08 if name == "kindle_app" else 0.5)
         assert cfg.focus_click_settle_sec == 1.0
@@ -183,3 +186,11 @@ def test_reader_profile_roundtrips_in_config_json(tmp_path) -> None:
 
 def test_get_reader_profile_returns_none_for_empty() -> None:
     assert get_reader_profile("") is None
+
+
+def test_aladin_web_profile_turns_pages_with_wheel() -> None:
+    """The Aladin web viewer ignores keyboard page turns (2026-11-24, Chrome)."""
+    cfg = CaptureConfig(title="t", base_dir="/x")
+    apply_reader_profile(cfg, "aladin_web")
+    assert cfg.next_key == "wheeldown"
+    assert cfg.reader_focus_clicks == 0

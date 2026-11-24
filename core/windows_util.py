@@ -280,6 +280,37 @@ def _vk_for_key(key: str) -> int | None:
     return _VK_BY_KEY.get(str(key or "").strip().lower())
 
 
+_WHEEL_NOTCHES_BY_KEY: dict[str, int] = {
+    "wheeldown": -1,
+    "wheelup": 1,
+}
+
+
+def wheel_notches_for_key(key: str) -> int:
+    """Signed wheel notches for a ``wheeldown`` / ``wheelup`` pseudo key, else 0."""
+    return _WHEEL_NOTCHES_BY_KEY.get(str(key or "").strip().lower(), 0)
+
+
+def _deliver_wheel_to_rect(
+    capture_rect: tuple[int, int, int, int], notches: int
+) -> tuple[bool, str]:
+    """One wheel event over the centre of ``capture_rect``; pointer restored after."""
+    import pyautogui
+
+    left, top, width, height = capture_rect
+    if width <= 0 or height <= 0:
+        return False, "wheel needs a non-empty capture_rect"
+    x = left + width // 2
+    y = top + height // 2
+    prev = pyautogui.position()
+    pyautogui.moveTo(x, y)
+    time.sleep(0.05)
+    pyautogui.scroll(int(notches), x, y)
+    time.sleep(0.05)
+    pyautogui.moveTo(prev.x, prev.y)
+    return True, f"via=wheel notches={notches} at=({x},{y})"
+
+
 def find_browser_content_hwnd(top_hwnd: int) -> int | None:
     """Largest visible Chrome/Edge renderer child HWND, if any."""
     if sys.platform != "win32" or top_hwnd <= 0:
@@ -584,11 +615,17 @@ def send_page_turn_key(
     reader_focus_clicks: int = 2,
     key_delivery: str = "auto",
 ) -> tuple[bool, str]:
-    """Activate window, optional focus clicks, then send ``key``."""
+    """Activate window, optional focus clicks, then send ``key``.
+
+    ``key`` may also be ``wheeldown`` / ``wheelup``: one mouse-wheel notch over
+    the centre of ``capture_rect`` instead of a keystroke. Browser readers that
+    ignore keyboard page turns (Aladin web viewer) still page on the wheel.
+    """
     if sys.platform != "win32":
         return False, "not Windows"
-    vk = _vk_for_key(key)
-    if vk is None:
+    wheel_notches = wheel_notches_for_key(key)
+    vk = None if wheel_notches else _vk_for_key(key)
+    if vk is None and not wheel_notches:
         return False, f"unknown key {key!r}"
 
     try:
@@ -622,6 +659,19 @@ def send_page_turn_key(
 
     time.sleep(0.08)
     key_name = str(key).strip().lower()
+    if wheel_notches:
+        if capture_rect is None:
+            return False, "wheel page turn needs capture_rect"
+        ok, via = _deliver_wheel_to_rect(capture_rect, wheel_notches)
+        parts = [
+            f"top=0x{top_hwnd:x}",
+            f"foreground={foreground_window_title()!r}",
+            "delivery='wheel'",
+        ]
+        if focus_note:
+            parts.append(focus_note)
+        parts.append(via)
+        return ok, "; ".join(parts)
     ok, via = _deliver_vk_to_window(
         top_hwnd,
         vk,

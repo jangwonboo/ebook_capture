@@ -162,9 +162,9 @@ class Rect:
 class PdfTrim:
     """PDF margin handling as fractions of capture width/height (0.0–0.45).
 
-    ``left/right/top/bottom`` crop chrome away. ``fill_top`` / ``fill_bottom``
-    paint white over a band just inside the top/bottom crop edge so in-app
-    toolbars can be blanked without shrinking page height.
+    ``left/right/top/bottom`` crop chrome away. ``fill_*`` paints white over a
+    band just inside the respective crop edge so in-app chrome can be blanked
+    without shrinking page height.
     """
 
     left: float = 0.0
@@ -173,6 +173,8 @@ class PdfTrim:
     bottom: float = 0.0
     fill_top: float = 0.0
     fill_bottom: float = 0.0
+    fill_left: float = 0.0
+    fill_right: float = 0.0
 
     def as_dict(self) -> dict[str, float]:
         return {
@@ -182,6 +184,8 @@ class PdfTrim:
             "bottom": float(self.bottom),
             "fill_top": float(self.fill_top),
             "fill_bottom": float(self.fill_bottom),
+            "fill_left": float(self.fill_left),
+            "fill_right": float(self.fill_right),
         }
 
     def is_active(self) -> bool:
@@ -194,11 +198,16 @@ class PdfTrim:
                 self.bottom,
                 self.fill_top,
                 self.fill_bottom,
+                self.fill_left,
+                self.fill_right,
             )
         )
 
     def validate(self) -> None:
-        for name in ("left", "right", "top", "bottom", "fill_top", "fill_bottom"):
+        for name in (
+            "left", "right", "top", "bottom",
+            "fill_top", "fill_bottom", "fill_left", "fill_right",
+        ):
             value = float(getattr(self, name))
             if value < 0.0 or value > 0.45:
                 raise ValueError(f"pdf_trim.{name} must be between 0.0 and 0.45")
@@ -211,6 +220,10 @@ class PdfTrim:
             raise ValueError(
                 "pdf_trim.top + fill_top + bottom + fill_bottom must be < 1.0"
             )
+        if self.left + self.fill_left + self.right + self.fill_right >= 1.0:
+            raise ValueError(
+                "pdf_trim.left + fill_left + right + fill_right must be < 1.0"
+            )
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any] | None) -> PdfTrim:
@@ -222,6 +235,8 @@ class PdfTrim:
             bottom=float(raw.get("bottom", 0.0)),
             fill_top=float(raw.get("fill_top", 0.0)),
             fill_bottom=float(raw.get("fill_bottom", 0.0)),
+            fill_left=float(raw.get("fill_left", 0.0)),
+            fill_right=float(raw.get("fill_right", 0.0)),
         )
 
 
@@ -236,6 +251,8 @@ def pdf_trim_from_mapping(data: Mapping[str, Any]) -> PdfTrim:
         bottom=float(data.get("pdf_trim_bottom", 0.0)),
         fill_top=float(data.get("pdf_trim_fill_top", 0.0)),
         fill_bottom=float(data.get("pdf_trim_fill_bottom", 0.0)),
+        fill_left=float(data.get("pdf_trim_fill_left", 0.0)),
+        fill_right=float(data.get("pdf_trim_fill_right", 0.0)),
     )
 
 

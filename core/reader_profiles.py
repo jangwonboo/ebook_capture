@@ -218,7 +218,7 @@ _RDP_PAGE_TURN_RETRIES = 2
 #
 # Only fields that *differ* from ``_proven_capture_defaults`` are set explicitly
 # (next_key, key_delivery, title, pdf_trim, notes). Re-verify each profile with
-# ``--debug-capture`` when tuning (see CONTEXT.md).
+# ``--debug-capture`` when tuning (see docs/CONTEXT.md).
 _BUILTIN_PROFILES: tuple[ReaderProfile, ...] = (
     ReaderProfile(
         name="kindle_app",

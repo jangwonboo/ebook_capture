@@ -148,7 +148,15 @@ def _should_merge_bodies(prev: SectionBlock, nxt: SectionBlock) -> bool:
     return True
 
 
-def _merge_two_body(prev: SectionBlock, nxt: SectionBlock) -> SectionBlock:
+def _merge_two_body(prev: SectionBlock, nxt: SectionBlock, starts=None) -> SectionBlock:
+    """Join two body blocks. ``starts`` (the book's word-start counts) is given
+    for page seams, where the cut can fall anywhere inside a word; line wraps
+    within a page keep the suffix heuristic of ``join_wrapped_lines``."""
+    if starts is not None:
+        from core.seam_repair import join_at_seam
+
+        return SectionBlock(type="body", text=join_at_seam(prev.text, nxt.text, starts))
+
     from core.text_reflow import join_wrapped_lines
 
     merged = join_wrapped_lines(prev.text.rstrip(), nxt.text.lstrip())
@@ -171,6 +179,9 @@ def merge_cross_page_paragraphs(pages: list[PageRecord]) -> list[PageRecord]:
     if not pages:
         return []
 
+    from core.seam_repair import book_word_starts
+
+    starts = book_word_starts(pages)
     merged_pages: list[PageRecord] = []
     carry: SectionBlock | None = None
 
@@ -178,7 +189,7 @@ def merge_cross_page_paragraphs(pages: list[PageRecord]) -> list[PageRecord]:
         sections = list(page.content_sections())
         if carry is not None:
             if sections and sections[0].type == "body":
-                sections[0] = _merge_two_body(carry, sections[0])
+                sections[0] = _merge_two_body(carry, sections[0], starts)
                 carry = None
             else:
                 if merged_pages:
@@ -198,7 +209,7 @@ def merge_cross_page_paragraphs(pages: list[PageRecord]) -> list[PageRecord]:
         ):
             last_page = merged_pages[-1]
             last_body = last_page.sections[-1]
-            last_page.sections[-1] = _merge_two_body(last_body, sections[0])
+            last_page.sections[-1] = _merge_two_body(last_body, sections[0], starts)
             sections = sections[1:]
             if not sections:
                 continue
@@ -275,12 +286,16 @@ def merge_code_blocks(pages: list[PageRecord]) -> list[PageRecord]:
 
 
 def normalize_paragraphs(pages: list[PageRecord]) -> list[PageRecord]:
-    """Reflow layout line breaks and merge split body paragraphs / code listings."""
+    """Reflow layout line breaks, rejoin headings printed on two lines, and
+    merge split body paragraphs / code listings."""
+    from core.seam_repair import repair_split_headings
     from core.text_reflow import reflow_page_sections
 
-    reflowed = [
-        PageRecord(page_num=page.page_num, sections=reflow_page_sections(page.sections))
-        for page in pages
-    ]
+    reflowed = repair_split_headings(
+        [
+            PageRecord(page_num=page.page_num, sections=reflow_page_sections(page.sections))
+            for page in pages
+        ]
+    )
     within = [merge_within_page_paragraphs(page) for page in reflowed]
     return merge_code_blocks(merge_cross_page_paragraphs(within))

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#eef0eb" />
+    <title>여백 — Local eBook Reader</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Serif+KR:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <input id="file-input" type="file" accept=".md,.markdown,text/markdown,image/*" multiple hidden />
+    <input id="folder-input" type="file" webkitdirectory hidden />
+    <div class="shell">
+      <header class="topbar">
+        <button id="side-toggle" class="icon-button" type="button" aria-label="탐색 패널 열기/닫기" aria-controls="sidebar" aria-expanded="true" title="탐색 패널">☰</button>
+        <span class="brand">여백<span>·</span></span>
+        <span id="book-title" class="book-title"></span>
+        <div class="top-actions">
+          <button id="folder-button" class="quiet-button" type="button" title="책 폴더를 열면 Markdown의 이미지 링크를 따라 그림을 표시합니다">폴더 열기</button>
+          <button id="open-button" class="quiet-button" type="button">파일 열기</button>
+          <select id="font-select" class="font-select" aria-label="본문 글꼴" title="본문 글꼴">
+            <option value="serif">기본 명조</option>
+            <option value="pretendard">Pretendard</option>
+            <option value="kopub-batang">KoPub 바탕</option>
+            <option value="kopub-dotum">KoPub 고딕</option>
+          </select>
+          <div class="seg" role="group" aria-label="글자 크기">
+            <button id="font-down" type="button" aria-label="글자 작게" title="글자 작게 (-)">가−</button>
+            <button id="font-up" type="button" aria-label="글자 크게" title="글자 크게 (+)">가+</button>
+          </div>
+          <button id="theme-button" class="icon-button" type="button" aria-label="테마 변경" title="테마 변경">◐</button>
+          <button id="settings-button" class="icon-button" type="button" aria-label="설정" title="설정 (AI 문답)">⚙</button>
+        </div>
+      </header>
+
+      <div id="app" class="app">
+        <aside id="sidebar" class="side" aria-label="책 탐색">
+          <div class="tabs" role="tablist" aria-label="탐색 패널">
+            <button id="tab-toc" class="tab" type="button" role="tab" aria-controls="pane-toc" aria-selected="true" data-tab="toc">목차</button>
+            <button id="tab-search" class="tab" type="button" role="tab" aria-controls="pane-search" aria-selected="false" data-tab="search" tabindex="-1">검색</button>
+            <button id="tab-saved" class="tab" type="button" role="tab" aria-controls="pane-saved" aria-selected="false" data-tab="saved" tabindex="-1">저장 <span id="saved-count"></span></button>
+          </div>
+
+          <div id="pane-toc" class="pane" role="tabpanel" aria-labelledby="tab-toc">
+            <input id="toc-filter" class="field" type="search" placeholder="목차 필터" aria-label="목차 필터" autocomplete="off" />
+            <div class="tree-tools">
+              <button id="expand-all" class="text-button" type="button">모두 펼치기</button>
+              <button id="collapse-all" class="text-button" type="button">모두 접기</button>
+            </div>
+            <div id="tree" class="tree"><p class="empty-copy">Markdown 파일을 열면 목차가 여기에 나타납니다.</p></div>
+          </div>
+
+          <div id="pane-search" class="pane" role="tabpanel" aria-labelledby="tab-search" hidden>
+            <input id="search-input" class="field" type="search" placeholder="책에서 찾기" aria-label="책에서 찾기" autocomplete="off" />
+            <p id="search-status" class="pane-status" role="status" aria-live="polite"></p>
+            <div id="search-results" class="result-list"></div>
+          </div>
+
+          <div id="pane-saved" class="pane" role="tabpanel" aria-labelledby="tab-saved" hidden>
+            <div class="saved-head">
+              <p>저장한 위치</p>
+              <button id="clear-saved-button" class="text-button" type="button">비우기</button>
+            </div>
+            <div id="saved-list" class="result-list"></div>
+          </div>
+        </aside>
+
+        <div id="grip" class="grip" role="separator" aria-orientation="vertical" aria-label="탐색 패널 너비 조절" tabindex="0"></div>
+
+        <main class="main">
+          <div id="welcome" class="welcome">
+            <div class="welcome-mark" aria-hidden="true">여</div>
+            <h1>Markdown을<br />읽는 여백.</h1>
+            <p class="welcome-copy">파일은 이 브라우저 안에서만 읽습니다. 책 폴더를 열면 Markdown에 적힌 이미지 링크를 따라 그림까지 표시합니다.</p>
+            <div class="welcome-actions">
+              <button id="welcome-folder" class="primary-button" type="button">책 폴더 열기</button>
+              <button id="welcome-open" class="quiet-button" type="button">Markdown 파일만 열기</button>
+            </div>
+            <p class="file-hint">폴더나 파일을 이 창에 끌어다 놓아도 됩니다.</p>
+          </div>
+
+          <div id="reader-view" class="reader-view" hidden>
+            <div class="toolbar">
+              <nav id="crumb" class="crumb" aria-label="현재 위치"></nav>
+              <span id="progress-label" class="progress-label"></span>
+              <button id="bookmark-button" class="nav-button" type="button" aria-pressed="false">☆ 위치 저장</button>
+              <button id="notes-toggle" class="nav-button" type="button" aria-pressed="false" aria-controls="notes-panel" title="주석 패널 열기/닫기">주석 <span id="notes-badge"></span></button>
+            </div>
+            <div class="progress-track" aria-hidden="true"><i id="progress-bar"></i></div>
+            <div id="scroll" class="scroll">
+              <article id="content" class="content" tabindex="-1"></article>
+              <nav class="pager" aria-label="장 이동">
+                <button id="prev-button" class="pager-button" type="button"><small>← 이전 장</small><span></span></button>
+                <button id="next-button" class="pager-button next" type="button"><small>다음 장 →</small><span></span></button>
+              </nav>
+            </div>
+          </div>
+        </main>
+
+        <aside id="notes-panel" class="notes-panel" aria-label="주석" hidden>
+          <div class="np-head">
+            <p>주석 <span id="notes-count"></span></p>
+            <button id="save-status" class="save-status" type="button"></button>
+            <button id="notes-close" class="icon-button" type="button" aria-label="주석 패널 닫기">×</button>
+          </div>
+          <div class="np-tools">
+            <div class="seg" role="group" aria-label="보기 범위">
+              <button id="scope-all" type="button" aria-pressed="true">전체</button>
+              <button id="scope-page" type="button" aria-pressed="false">이 장</button>
+            </div>
+            <select id="filter-color" class="font-select" aria-label="색으로 거르기">
+              <option value="">색 전체</option>
+              <option value="yellow">노랑</option>
+              <option value="green">초록</option>
+              <option value="blue">파랑</option>
+              <option value="pink">분홍</option>
+              <option value="none">색 없음</option>
+            </select>
+            <select id="filter-kind" class="font-select" aria-label="종류로 거르기">
+              <option value="">종류 전체</option>
+              <option value="memo">메모 있음</option>
+              <option value="ai">AI 문답 있음</option>
+            </select>
+            <select id="filter-tag" class="font-select" aria-label="태그로 거르기"><option value="">태그 전체</option></select>
+          </div>
+          <div class="np-search"><input id="notes-search" class="field" type="search" placeholder="주석에서 찾기" aria-label="주석에서 찾기" autocomplete="off" /></div>
+          <div id="notes-list" class="notes-list"></div>
+          <div class="np-foot">
+            <button id="export-md" class="text-button" type="button">Markdown 내보내기</button>
+            <button id="export-json" class="text-button" type="button">JSON 내보내기</button>
+            <button id="import-json" class="text-button" type="button">가져오기</button>
+            <input id="import-input" type="file" accept=".json,application/json" hidden />
+          </div>
+        </aside>
+      </div>
+    </div>
+    <div id="scrim" class="scrim" hidden></div>
+    <div id="hl-bar" class="hl-bar" role="toolbar" aria-label="형광펜" hidden>
+      <button class="swatch hl-yellow" type="button" data-color="yellow" aria-label="노랑 형광펜" title="노랑"></button>
+      <button class="swatch hl-green" type="button" data-color="green" aria-label="초록 형광펜" title="초록"></button>
+      <button class="swatch hl-blue" type="button" data-color="blue" aria-label="파랑 형광펜" title="파랑"></button>
+      <button class="swatch hl-pink" type="button" data-color="pink" aria-label="분홍 형광펜" title="분홍"></button>
+      <button id="hl-bar-memo" class="hl-action" type="button" title="메모 (M)">메모</button>
+      <button id="hl-bar-ask" class="hl-action ask" type="button" title="AI에게 묻기 (A)">AI에게 묻기</button>
+      <button id="hl-bar-copy" class="hl-action" type="button">복사</button>
+      <button id="hl-bar-delete" class="hl-action" type="button" hidden>삭제</button>
+    </div>
+    <dialog id="settings" class="chooser settings" aria-labelledby="settings-title">
+      <h2 id="settings-title">설정 · AI 문답</h2>
+      <p id="settings-hint" class="settings-hint" hidden></p>
+      <label class="form-row" for="ai-key">Anthropic API 키
+        <input id="ai-key" class="field" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…" />
+      </label>
+      <label class="check-row"><input id="ai-remember" type="checkbox" checked /> 이 브라우저에 키 저장 <button id="ai-key-clear" class="text-button" type="button">저장된 키 지우기</button></label>
+      <p class="settings-note">키는 이 브라우저 안에만 두고 Anthropic API를 부를 때만 씁니다. 주석 파일이나 내보낸 파일에는 들어가지 않습니다. 저장을 끄면 창을 닫을 때 사라집니다. 같은 PC의 다른 로컬 HTML 파일이 브라우저 저장소를 읽을 수 있으니, 공용 PC에서는 저장을 끄세요.</p>
+      <label class="form-row" for="ai-model">모델
+        <select id="ai-model" class="field">
+          <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (기본)</option>
+          <option value="claude-opus-5-5">Claude Opus 5.5</option>
+          <option value="claude-haiku-5-5">Claude Haiku 5.5</option>
+        </select>
+      </label>
+      <label class="form-row" for="ai-presets">미리 준비된 질문 <small>한 줄에 하나: 버튼 이름 | 보낼 질문</small>
+        <textarea id="ai-presets" class="field" rows="5" spellcheck="false"></textarea>
+      </label>
+      <div class="dialog-actions">
+        <button id="settings-cancel" class="quiet-button" type="button">취소</button>
+        <button id="settings-save" class="primary-button" type="button">저장</button>
+      </div>
+    </dialog>
+    <dialog id="consent" class="chooser" aria-labelledby="consent-title">
+      <h2 id="consent-title">이 책의 내용을 AI에게 보낼까요?</h2>
+      <p class="settings-note">질문할 때마다 고른 문장, 지금 읽는 장의 본문 전체, 책 제목과 목차, 이 주석의 이전 문답이 Anthropic API로 전송됩니다. 메모와 다른 주석은 보내지 않습니다. 사용료는 입력한 API 키의 계정에 청구됩니다. 동의는 이 책에 대해 기억합니다.</p>
+      <div class="dialog-actions">
+        <button id="consent-cancel" class="quiet-button" type="button">취소</button>
+        <button id="consent-ok" class="primary-button" type="button">동의하고 계속</button>
+      </div>
+    </dialog>
+    <dialog id="chooser" class="chooser" aria-labelledby="chooser-title">
+      <h2 id="chooser-title">어느 Markdown을 열까요?</h2>
+      <div id="chooser-list" class="result-list"></div>
+      <button id="chooser-cancel" class="text-button" type="button">취소</button>
+    </dialog>
+    <div id="drop-zone" class="drop-zone" aria-hidden="true">파일을 놓아 책을 엽니다</div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="app.js"></script>
+    <script src="notes.js"></script>
+  </body>
+</html>

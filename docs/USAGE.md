@@ -1,7 +1,7 @@
 # ebook_capture 사용법
 
 화면(또는 지정 창)을 연속 캡처해 **PNG**, **이미지 PDF**, 또는 **OCR Markdown**을 만듭니다.  
-설치·개요: [README.md](README.md) · 개발자 문서: [REQUIREMENTS.md](REQUIREMENTS.md)
+설치·개요: [README.md](../README.md) · 개발자 문서: [REQUIREMENTS.md](REQUIREMENTS.md)
 
 ```powershell
 python -m ebook_capture run [options]
@@ -100,6 +100,8 @@ python -m ebook_capture run --title Book --base-dir E:\ebook --text --input-pdf 
 | 목차 줄 | 끝에 쪽 번호가 붙은 제목(`1.1 인공지능이란? 016`)은 제목이 아니라 본문 |
 | 러닝 헤더 | 대문자 영문 러닝 헤더(`MACHINE LEARNING FOR …`)는 어떤 블록으로 오든 버림 |
 | OCR 오타 | 조립 전에 한글 어절을 사전으로 고침: `core/ocr_typo_fix.py`의 기본 항목 + 프로젝트 루트 `ocr_typos.txt` + 책 폴더 `ocr_typos.txt`(`틀린표기 -> 맞는표기`, 어절 앞부분에 매칭되어 조사는 따라옴, `!단어`는 보호). 수식·코드 스팬·그림/링크 경로와 code/equation/figure 섹션은 건드리지 않음. 바꾼 내역은 `{title}_typo_fixes.txt`에 남기고, `--no-typo-fix`로 끔. `--typo-freq`를 주면 책 안 빈도로도 추정(3음절 이상 어절 앞부분이 5회 이하로 드문데 헷갈리는 자모 하나만 바꾸면 5회 이상·3배 이상 잦은 어절이 되는 경우)하지만 `빅테이블→빅데이블`, `앉는다→않는다`처럼 멀쩡한 희귀 단어를 바꾸는 오탐이 많아 내역을 반드시 검토해야 함 |
+| 쪽 경계 병합 | 쪽 경계에서 잘린 문단을 이을 때 띄어쓰기를 책 전체의 낱말 목록으로 정함(`core/seam_repair.py`). 이은 형태가 책의 다른 곳에 낱말로 나오면 붙이고("순"+"탄하지"→"순탄하지"), 앞 조각이 조사·어미로 끝난 완결된 낱말이면 띄움("삶의"+"의미를"). 조사·어미만 남은 뒤 조각("는", "다.")은 붙임. 쪽 안의 줄바꿈은 기존 접미 규칙 그대로 |
+| 두 줄 제목 | 같은 종류의 제목 블록(`subtitle`, `section_title`)이 연달아 나오면 한 제목으로 이음. 제목 바로 앞의 짧은 본문·캡션(15자 이하, 한글만, 쉼표나 조사로 끝남: "마흔,", "삶에서")은 제목의 첫 줄로 붙임. 앞 제목이 문장부호로 끝나거나 뒤 제목이 번호로 시작하면 그대로 둠 |
 | LLM 교정 | `--proofread`: 쪽마다 산문 섹션(코드·수식·표·그림 제외)을 번호 붙여 Claude에 보내고 `{"fixes":[{"seg","from","to"}]}` 목록만 받음(출력이 짧아 비용은 거의 입력 토큰, 266쪽 약 $1). 적용 전 로컬 검증: `from`이 그 세그먼트에 정확히 한 번 있어야 하고, 길이 차 4 이하·유사도 0.5 이상(문장 고쳐 쓰기 차단), 한글이 들어간 교정만, 수식·코드 스팬 안은 제외. 적용/거부 내역 모두 `{title}_typo_fixes.txt`에 남김. 캐시 `tmp/{title}_NNNN.proof.json`(쪽 텍스트+모델 해시) |
 
 장 표시(`N장`/`Chapter N`)가 한 번도 없는 입력(책에서 한 장만 잘라 변환)은 "Front matter"가 아니라 제목이 `title`인 단일 장으로 조립됩니다.

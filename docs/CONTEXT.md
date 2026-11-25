@@ -2,7 +2,7 @@
 
 작성일: 2026-07-25  
 상태: **Kindle for PC (`kindle_app`) 캡처 루프 검증 완료.** 동일 파라미터를 다른 프로필에 전파해 둠.  
-관련 문서: [USAGE.md](USAGE.md) · [REQUIREMENTS.md](REQUIREMENTS.md) §12 · [reader_profiles.jsonc](reader_profiles.jsonc)
+관련 문서: [USAGE.md](USAGE.md) · [REQUIREMENTS.md](REQUIREMENTS.md) §12 · [reader_profiles.jsonc](../reader_profiles.jsonc)
 
 ---
 

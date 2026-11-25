@@ -1,7 +1,7 @@
 # ebook_capture — Requirements & Architecture (개발자용)
 
 사용자 매뉴얼: [`USAGE.md`](USAGE.md)  
-제품 개요·설치: [`README.md`](README.md)
+제품 개요·설치: [`README.md`](../README.md)
 
 이 문서는 **요구사항, 아키텍처, 설계 결정, 모듈 책임, 파이프라인, 재사용 포인트**를 정리한다.  
 (구 `FLOW.md` / `GUIDE.md` / `TRANSFER_CONTEXT.md`를 통합·갱신.)

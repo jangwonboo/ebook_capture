@@ -7,3 +7,7 @@ service_account.json
 certs/
 *.cer
 *.egg-info/
+.venv/
+.pytest_cache/
+# scratch output at the repo root (tests/fixtures/**/tmp stays tracked)
+/tmp/

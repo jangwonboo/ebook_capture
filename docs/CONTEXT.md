@@ -122,7 +122,7 @@ Kindle 데스크톱 앱에서 “중앙 클릭×2 → settle → 캡처 → righ
 | `kindle_app` | right | sendinput | `Kindle` | top **0.032** | ✅ |
 | `kindle_cloud` | right | **pyautogui** | (GUI에서 탭 제목) | 0 TBD | ❌ 실기 미검증 |
 | `aladin_app` | **pagedown** | **sendinput** | (설정 필요) | 0 TBD | ❌ (예전엔 pyautogui로 “확인” 기록만) |
-| `aladin_web` | **pagedown** | **pyautogui** | (GUI에서 탭 제목) | 0 TBD | ❌ |
+| `aladin_web` | **wheeldown** | wheel | (GUI에서 탭 제목) | 0 TBD | ✅ 2026-11-24 (4쪽 스모크, 포커스 클릭 0) |
 
 변경 의도:
 - Cloud: 예전 `focus_clicks=0`(상단 Aa) → **중앙 클릭×2**로 kindle_app과 동일. 상단만 피하면 됨.
@@ -156,6 +156,7 @@ python -m ebook_capture run --config default_config.jsonc --reader aladin_web  -
 ### 5.2 리더별 튜닝 후 프로필에 반영
 
 - [ ] `aladin_app` `target_window_title` 확정 (창 제목 부분 일치)
+- [x] `aladin_web` `pdf_trim` 측정·반영 (top 0.058 / bottom 0.040, 2026-11-24)
 - [ ] `kindle_cloud` / `aladin_web` — 브라우저 탭 제목 예시를 USAGE에 한 줄 추가
 - [ ] 각 리더 첫 클린 PNG로 `pdf_trim` 비율 측정 → `reader_profiles.jsonc` + built-in
 - [ ] Aladin SendInput 실패 시 `aladin_app.key_delivery`를 `pyautogui`로 되돌리고 note 갱신
@@ -205,3 +206,51 @@ python -m ebook_capture run --config default_config.jsonc --reader kindle_app --
 - 캡처 **후**에 focus click 넣는 순서로 되돌리기
 - Kindle `pdf_trim.top`을 이유 없이 0으로 리셋
 - resume이 켜진 채로 깨진 PNG가 있는 `tmp`에서 “안 넘어간다”고 단정 (먼저 PNG 삭제 / `--force-phase capture`)
+
+---
+
+## 9. 중단 작업 인계 - Chrome 알라딘 웹뷰어 (2026-11-24)
+
+- 대상: Chrome 탭 `마흔에 읽는 비트겐슈타인 - Google Chrome`, URL은 `webviewer.ebook.aladin.co...`.
+- 시작 화면 확인: 표지, 진행률 `0%` (`처음으로`)였다. Chrome client capture rect는 `left=810, top=-2160, width=1278, height=2159`.
+- 출력 경로: `D:\ebook\마흔에 읽는 비트겐슈타인`.
+- 현재 PDF/PNG는 **유효한 완성본이 아님**: 표지 1장만 있다. `capture_state.json`의 `end_of_book_last_page: 1`은 잘못된 종료 감지 결과이므로 재시도 전 제거해야 한다.
+
+### 실패 원인
+
+1. Windows Computer Use (`cua_repl`)는 두 번 모두 `native pipe is unavailable` / `The system cannot find the file specified`로 초기화 실패. Chrome UI 자동화 도구 자체가 현 세션에서 불가했다.
+2. repo CLI가 Chrome 창을 찾아 화면 캡처하는 데는 성공했지만, `right` + `pyautogui`는 웹뷰어의 페이지 전환을 일으키지 않았다. 중앙 클릭 1회 후에도 같은 결과였다.
+3. 화면 fingerprint `meandiff=0.285`가 기본 tolerance `0.300` 이하라 페이지 미전환으로 분류되었고, 3회 반복 뒤 1쪽에서 끝장으로 오인했다.
+
+### 남겨둔 재시도 설정
+
+`tmp\chrome_ebook_capture_config.json`:
+
+- Chrome window-full screen capture
+- 중심보다 위쪽의 뷰어 본문 지점 `(0.5, 0.28)` 클릭 1회로 포커스 확보
+- 다음 키는 마지막에 `pagedown`으로 바꿔 둠 (아직 단발 검증하지 않음)
+- 자동 크롭, 사방 4% PDF 여백, 왼쪽 1%·하단 5% white fill
+
+### 해결 (2026-11-24 저녁)
+
+- 원인: 알라딘 웹뷰어는 `right`/`pagedown`/`space`/`down` 키를 pyautogui·SendInput 어느 쪽으로 보내도 무시한다 (`test-key` 전후 meandiff 0.0). 본문 클릭은 메뉴 오버레이(상단 바·좌우 화살표·하단 진행바) 토글이라 포커스 클릭 2회는 메뉴를 켰다 끄는 동작이었다.
+- 되는 입력: 캡처 영역 중앙에서 마우스 휠 1칸(meandiff 13~17), 메뉴를 연 상태의 우측 `>` 버튼 클릭(오버레이가 캡처에 남아 부적합).
+- 조치: `next_key`에 `wheeldown`/`wheelup` 의사 키 추가(`windows_util.send_page_turn_key` → `_deliver_wheel_to_rect`), `aladin_web` 프로필을 `wheeldown` + `reader_focus_clicks=0`으로 변경, GUI 콤보에 Wheel Down/Up 추가.
+- 검증: `run --reader aladin_web --pages 4 --debug-capture` 4쪽 모두 `page moved`, PDF 생성. 전체 캡처 명령은 USAGE 예시와 같고 `--pages N --no-resume`을 붙인다.
+
+### 전체 캡처 결과 (2026-11-24 18:37)
+
+- 명령: `python -m ebook_capture run --reader aladin_web --title "비트겐슈타인" --base-dir D:/ebook --window-title "비트겐슈타인" --pdf --pages 400 --no-resume -y`
+- 결과: 233쪽에서 끝장 감지(`마지막 페이지입니다` 100%)로 정상 종료. PNG 233장, `D:\ebook\비트겐슈타인\비트겐슈타인.pdf` 233쪽.
+- 첫 실행은 이전 시도의 `capture_state.json`에 남은 `end_of_book_last_page: 2` 때문에 `--no-resume`인데도 2쪽에서 멈췄다. `pipeline.run`에서 `--no-resume`이면 그 값을 버리도록 고쳤다(`CAPTURE_END_OF_BOOK_RESET` 로그).
+- PDF는 처음에 Chrome 탭/주소창/북마크 바와 뷰어 하단 상태줄이 그대로 들어갔다. 책 config의 `pdf_trim`은 프로필 적용 시 프로필의 `pdf_trim`(전부 0)에 덮였다. 그래서 측정값을 `aladin_web` 프로필 자체에 넣었다: top 0.058(Chrome UI 121px/2159), bottom 0.040(하단 러닝헤드·진행률 2086~2098행). 본문 최저 행은 0.94. `--force-phase pdf`로 재조립해 확인함. 재조립용 책 config: `tmp/wit_book_config.json`.
+- 남은 흠: 마지막 PNG(0233)는 `마지막 페이지입니다` 대화상자가 판권면 하단 여백 위에 겹쳐 있다. 본문 내용은 가려지지 않았다.
+- 미해결(보류): 물리 키보드로는 넘김이 되는데 주입 키(pyautogui·SendInput, VK/스캔코드 조합 전부)는 뷰어 페이지가 무시한다. Ctrl+F는 Chrome UI에 닿으므로 OS→Chrome 경로는 정상. top 프레임 콘솔 `keydown` 리스너에는 아무것도 안 찍혔고, `max.aladin.co.kr` iframe 컨텍스트 결과는 확인 전. 후보는 (1) 이 PC의 키보드 보안 모듈(nProtect Online Security·INITECH·Softcamp) 저수준 훅의 주입 키 필터, (2) 뷰어 스크립트의 포커스 요소 조건. 휠 넘김으로 우회했으므로 캡처에는 영향 없음.
+- 테스트: 176 통과. `test_apply_kindle_app_profile`, `test_apply_rdp_full_profile` 2건은 이 세션 전부터 작업 중이던 `pdf_trim` fill_left/fill_right 변경(`core/config.py`, `reader_profiles.jsonc`)과 어긋나 실패한다. 테스트 기대값을 새 fill 필드에 맞춰야 한다.
+
+### OCR → Markdown (2026-11-24 19:36)
+
+- 명령: `python -m ebook_capture run --config tmp/wit_book_config.json --text --ocr-engine anthropic --ocr-workers 4 --style full -y` (Claude Vision haiku-4-5, 4 동시 요청).
+- 결과: `D:\ebook\비트겐슈타인\비트겐슈타인.md` (233쪽, 장 6개, h2 7 / h3 164), `*.ocr.json` 233개, `_ocr.txt`, `_structure.json`, `_typo_fixes.txt`(교정 0).
+- 첫 실행에서 6쪽(77, 98, 132, 179, 201, 203)이 `Expecting ',' delimiter` JSON 파싱 오류로 실패. 모델이 본문의 큰따옴표를 이스케이프 없이 JSON 문자열 안에 그대로 넣은 것이 원인이고, 98·132쪽은 재시도해도 같은 위치에서 반복됐다.
+- 조치: `google_ocr._extract_json_object`에 마지막 단계 복구(`_repair_json_strings`: 문자열 안의 맨 큰따옴표·원시 줄바꿈 이스케이프)를 넣고, `anthropic_ocr`는 `JSONDecodeError`도 재시도 대상으로 바꿨다. 회귀 테스트 `test_extract_json_object_repairs_bare_quotes_and_newlines`. 그 뒤 `--text` 재실행으로 남은 쪽이 모두 통과했다.

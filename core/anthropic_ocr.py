@@ -91,7 +91,9 @@ def _call_anthropic_json(
         except Exception as exc:  # noqa: BLE001 - API exposes many exception types
             last_error = exc
         message = str(last_error).lower()
-        retryable = any(token in message for token in ("429", "rate", "overload", "temporar", "timeout", "json"))
+        retryable = isinstance(last_error, json.JSONDecodeError) or any(
+            token in message for token in ("429", "rate", "overload", "temporar", "timeout", "json")
+        )
         if retryable and attempt < max_retries - 1:
             time.sleep(base_delay * (2**attempt))
             continue

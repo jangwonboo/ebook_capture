@@ -31,9 +31,9 @@ def _safe_dpi(value: object) -> float:
 def crop_image_by_trim_ratios(img: Image.Image, trim: PdfTrim) -> Image.Image:
     """Apply ``PdfTrim``: optional white-fill bands, then crop margins.
 
-    ``fill_top`` / ``fill_bottom`` are ratios of the *original* height and paint
-    white starting just inside the top/bottom crop edges (so toolbars can be
-    blanked without removing vertical space).
+    ``fill_*`` values are ratios of the original corresponding dimension and
+    paint white starting just inside the matching crop edge. This removes
+    toolbars and persistent reader borders without removing page height/width.
     """
     from PIL import ImageDraw
 
@@ -54,7 +54,9 @@ def crop_image_by_trim_ratios(img: Image.Image, trim: PdfTrim) -> Image.Image:
     work = img
     fill_top_px = int(round(height_px * trim.fill_top))
     fill_bottom_px = int(round(height_px * trim.fill_bottom))
-    if fill_top_px > 0 or fill_bottom_px > 0:
+    fill_left_px = int(round(width_px * trim.fill_left))
+    fill_right_px = int(round(width_px * trim.fill_right))
+    if fill_top_px > 0 or fill_bottom_px > 0 or fill_left_px > 0 or fill_right_px > 0:
         work = img.copy()
         if work.mode not in ("RGB", "RGBA"):
             work = work.convert("RGB")
@@ -67,6 +69,14 @@ def crop_image_by_trim_ratios(img: Image.Image, trim: PdfTrim) -> Image.Image:
             y0 = max(top, bottom - fill_bottom_px)
             if bottom > y0:
                 drawer.rectangle([left, y0, right - 1, bottom - 1], fill=(255, 255, 255))
+        if fill_left_px > 0:
+            x1 = min(right, left + fill_left_px)
+            if x1 > left:
+                drawer.rectangle([left, top, x1 - 1, bottom - 1], fill=(255, 255, 255))
+        if fill_right_px > 0:
+            x0 = max(left, right - fill_right_px)
+            if right > x0:
+                drawer.rectangle([x0, top, right - 1, bottom - 1], fill=(255, 255, 255))
 
     return work.crop((left, top, right, bottom))
 

@@ -53,8 +53,11 @@ from gui.snipping import SnippingWidget
 from gui.ui_capture import Ui_Dialog
 
 # CLI --next-key / default_config: pagedown|pageup|right|left|down|up|space|enter
+# plus wheeldown|wheelup (one mouse-wheel notch over the page; Aladin web viewer).
 NEXT_KEY_ITEMS = (
     ("Page Down", "pagedown"),
+    ("Wheel Down", "wheeldown"),
+    ("Wheel Up", "wheelup"),
     ("Page Up", "pageup"),
     ("Right", "right"),
     ("Left", "left"),

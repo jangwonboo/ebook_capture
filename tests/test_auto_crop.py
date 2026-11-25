@@ -234,6 +234,8 @@ def test_outline_to_trim_keeps_fill_bands_and_clamps() -> None:
         "bottom": 0.02,
         "fill_top": 0.02,
         "fill_bottom": 0.0,
+        "fill_left": 0.0,
+        "fill_right": 0.0,
     }
     wide = PageOutline(left=0.6, top=0.0, right=1.0, bottom=1.0, source="content_union", n_pages=1)
     assert outline_to_trim(wide).left == 0.45  # PdfTrim edge ceiling

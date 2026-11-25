@@ -199,6 +199,11 @@ _KINDLE_APP_FOCUS_Y_RATIO = 0.08
 _ALADIN_APP_TOP_TITLE_RATIO = 0.010
 _ALADIN_APP_TOP_TOOLBAR_FILL_RATIO = 0.026
 _ALADIN_APP_BOTTOM_NAV_RATIO = 0.045
+# Aladin web viewer in Chrome (2026-11-24, client 1278x2159): tab strip + omnibox
+# + bookmarks bar end at row 121 (0.056); viewer footer (running head / progress)
+# occupies rows 2086-2098 (0.966-0.972), body text never below 0.94.
+_ALADIN_WEB_TOP_BROWSER_UI_RATIO = 0.058
+_ALADIN_WEB_BOTTOM_FOOTER_RATIO = 0.040
 
 # Reader inside an RDP session (mstsc window). The remote reader draws its own
 # page-turn toolbar for a moment after each key and on any pointer motion, so
@@ -269,12 +274,23 @@ _BUILTIN_PROFILES: tuple[ReaderProfile, ...] = (
         name="aladin_web",
         label="Aladin web viewer (browser)",
         note=(
-            "Same loop as kindle_app; PageDown/pyautogui. "
-            "Pick browser tab title in GUI/config. pdf_trim TBD."
+            "Keyboard page turns are ignored by the viewer (2026-11-24, Chrome): "
+            "one wheel notch over the page turns it. No focus clicks: a click on "
+            "the page toggles the menu overlay. Pick browser tab title in GUI/config."
         ),
-        next_key="pagedown",
+        next_key="wheeldown",
         key_delivery=KEY_DELIVERY_PYAUTOGUI,
-        **_proven_capture_defaults(),
+        **{
+            **_proven_capture_defaults(
+                PdfTrim(
+                    left=0.0,
+                    right=0.0,
+                    top=_ALADIN_WEB_TOP_BROWSER_UI_RATIO,
+                    bottom=_ALADIN_WEB_BOTTOM_FOOTER_RATIO,
+                )
+            ),
+            "reader_focus_clicks": 0,
+        },
     ),
     ReaderProfile(
         name="rdp_full",

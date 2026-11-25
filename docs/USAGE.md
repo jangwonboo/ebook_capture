@@ -1,7 +1,7 @@
 # ebook_capture 사용법
 
 화면(또는 지정 창)을 연속 캡처해 **PNG**, **이미지 PDF**, 또는 **OCR Markdown**을 만듭니다.  
-설치·개요: [README.md](../README.md) · 개발자 문서: [REQUIREMENTS.md](REQUIREMENTS.md)
+설치·개요: [README.md](../README.md) · 동작 규칙·문제 해결 카탈로그: [ARCHITECTURE.md](ARCHITECTURE.md) · 지금 상태: [CONTEXT.md](CONTEXT.md)
 
 ```powershell
 python -m ebook_capture run [options]
@@ -17,10 +17,11 @@ ebook-capture run [options]
 |------|-----------|------|
 | **images** | `tmp/{title}_NNNN.png` | 캡처만 |
 | **pdf** | PNG + `{title}.pdf` | 이미지 PDF (**기본**) |
-| **text** | `*.ocr.json` + `{title}.md` | Gemini OCR → Markdown |
+| **text** | `*.ocr.json` + `{title}.md` | OCR → Markdown (Gemini / Claude Vision / Datalab) |
 
 `--text`는 OCR과 Markdown 조립까지 한 번에 합니다.  
-소스 우선순위: `--input-pdf`(명시) → 이미 있는 PNG → 책 폴더의 PDF → (없으면) 화면 캡처.
+소스 우선순위: `--input-pdf`(명시) → 이미 있는 PNG → 책 폴더의 PDF → (없으면) 화면 캡처.  
+만든 Markdown은 웹 리더로 읽습니다: [reader/README.md](../reader/README.md).
 
 ---
 
@@ -30,6 +31,7 @@ ebook-capture run [options]
 |------|------|
 | `gui` | 그래픽 인터페이스 |
 | `run` | 캡처 / PDF / OCR 실행 |
+| `monitors` | 모니터 번호·해상도 (`--capture-monitor`용) |
 | `test-key` | 페이지 넘김 키만 테스트 |
 | `inspect` | 창 위치·캡처 영역 확인 |
 
@@ -73,9 +75,17 @@ python -m ebook_capture run --title Book --base-dir E:\ebook --text --input-pdf 
 python -m ebook_capture run --title Book --base-dir E:\ebook --text --input-pdf E:\in\book.pdf --ocr-engine datalab --ocr-workers 6 -y
 ```
 
-### PDF → OCR → Markdown (Datalab)
+### OCR 엔진 고르기
 
-`--ocr-engine datalab`은 [Datalab](https://www.datalab.to)(호스팅 Marker)에 페이지를 보내 **유형이 붙은 레이아웃 블록**(SectionHeader / Text / Caption / Footnote / Table / Equation / PageHeader …)을 받고, 그것을 `tmp/*.ocr.json`의 section 타입(`title` / `section_title` / `body` / `caption` / `footnote` / `table` / `equation` / `header` / `page_number`)으로 바로 대응시킵니다. 프롬프트가 없으므로 `--ocr-prompt*`와 `--ocr-lang`은 무시됩니다. 그 뒤의 장·단락 조립(`{title}.md`)은 Gemini 경로와 같습니다.
+| `--ocr-engine` | 특징 | 키 |
+| --- | --- | --- |
+| `google` (기본) | Gemini. 프롬프트·`--ocr-lang` 사용 | `GOOGLE_API_KEY` |
+| `anthropic` | Claude Vision (기본 `claude-haiku-4-5-20251001`, `--anthropic-ocr-model`로 변경) | `ANTHROPIC_API_KEY` |
+| `datalab` | [Datalab](https://www.datalab.to)(호스팅 Marker). 유형이 붙은 레이아웃 블록을 받아 수식·그림·표·코드를 살림. 프롬프트·`--ocr-lang`은 무시 | `DATALAB_API_KEY` |
+
+어느 엔진이든 결과는 같은 `tmp/*.ocr.json` 형식이고, 그 뒤 조립은 같습니다. 수식·그림·표·제목이 Markdown에서 어떻게 되는지는 [ARCHITECTURE §8](ARCHITECTURE.md#8-markdown-조립-규칙).
+
+Datalab 메모:
 
 - 입력은 `tmp/*.png`(캡처 결과) 또는 `--input-pdf`(한 쪽씩 잘라 PDF 그대로 전송). 둘 다 쪽당 1건 요청이며 실측 accurate 모드 약 1센트/쪽, 쪽당 10초 안팎.
 - `--ocr-workers N`(1-16): 동시 요청 수. Datalab은 요청마다 큐에 서므로 4-8이면 벽시계 시간이 그만큼 줄고 비용은 같습니다. 429/연결 끊김은 Retry-After로 물러나 재시도합니다.
@@ -83,32 +93,11 @@ python -m ebook_capture run --title Book --base-dir E:\ebook --text --input-pdf 
 - `OCR_COST datalab pages=N usd=X`: 응답의 `cost_breakdown.final_cost_cents` 합계(단위 센트 → 달러).
 - `--datalab-mode fast|balanced|accurate`(기본 accurate). `fast`는 PDF 텍스트 레이어를 긁어 인라인 수식을 놓칩니다.
 
-수식·그림·표·코드는 다음처럼 남습니다(기술서 한 장, 100쪽 실측: 수식 92건 표시·187건 인라인, 그림 29장, 표 10개, 코드 118블록).
+### 오타 교정
 
-| 원본 | Markdown |
-| --- | --- |
-| 수식(별행) | `$$`를 앞뒤 별도 줄에 둔 블록(Typora는 한 줄짜리 `$$…$$`를 렌더하지 않음). `\begin{aligned}`의 `\\` 행 구분마다 줄바꿈 |
-| 수식(본문 속) | `$ … $`. Typora는 기본값이 꺼져 있으니 환경설정 > Markdown > "인라인 수식"을 켜야 함 |
-| 그림 | `<output_dir>/assets/<sha1 16자리>.jpg\|png`에 저장하고 `![그림](assets/…)`로 참조. 64px 미만 장식 이미지는 버림. 캡션(`그림 4-12 …`)은 그림 앞 이탤릭 줄, 앞의 장식 기호(`♥ ▼`)는 제거 |
-| 표 | 행·열이 고른 표는 파이프 표(`\| … \|`), 병합 셀(rowspan/colspan)이 있으면 HTML `<table>` 유지(셀 안 `<math>`는 `$…$`) |
-| 코드 | ` ``` ` 펜스. Datalab이 `<pre>`로 감싼 Text 블록도 코드로 봄. 쪽 경계나 줄 묶음 단위로 쪼개진 코드 블록은 사이에 러닝 헤더·쪽 번호·쪽 하단 각주만 있으면 하나로 이어 붙임(들여쓰기는 OCR 결과 그대로) |
-| 절 번호 제목 | `4.3 제목` → `###`, `4.3.1 …`(그 이하) → `####`. 번호만 러닝 헤더로 떨어진 경우(`4.8` + 다음 제목) 붙여서 복원 |
-| `C O L U M N` 상자 라벨 | 버림(상자 제목만 `####`) |
-| 장 머리 | `N장` 라벨(위첨자 `<sup>장</sup>` 포함) + 다음 제목 → `## N장 제목`. 라벨만 있고 제목이 안 따르면(스크린샷 라벨) 본문 |
-| 숫자만 있는 장 머리 | 쪽 첫머리의 큰 숫자 제목(`01`) 바로 뒤에 일반 제목이 오면 `N장` 라벨로 보고 `## 1장 제목`으로 조립(마스터링 트랜스포머처럼 "장" 글자가 없는 책). 쪽 중간의 숫자나 뒤에 절 번호 제목이 오는 경우는 제외. 숫자 위에 `CHAPTER`/`PART` 글자만 따로 있으면 라벨의 일부로 보고 버림(허깅페이스 트랜스포머 하드 트레이닝) |
-| 인라인 강조 | `<b>`/`<i>`/`<u>` 등은 공백 없이 제거(`<b>자연어 처리</b>(NLP)` → `자연어 처리(NLP)`); 블록 태그만 공백으로 바꿈 |
-| 목차 줄 | 끝에 쪽 번호가 붙은 제목(`1.1 인공지능이란? 016`)은 제목이 아니라 본문 |
-| 러닝 헤더 | 대문자 영문 러닝 헤더(`MACHINE LEARNING FOR …`)는 어떤 블록으로 오든 버림 |
-| OCR 오타 | 조립 전에 한글 어절을 사전으로 고침: `core/ocr_typo_fix.py`의 기본 항목 + 프로젝트 루트 `ocr_typos.txt` + 책 폴더 `ocr_typos.txt`(`틀린표기 -> 맞는표기`, 어절 앞부분에 매칭되어 조사는 따라옴, `!단어`는 보호). 수식·코드 스팬·그림/링크 경로와 code/equation/figure 섹션은 건드리지 않음. 바꾼 내역은 `{title}_typo_fixes.txt`에 남기고, `--no-typo-fix`로 끔. `--typo-freq`를 주면 책 안 빈도로도 추정(3음절 이상 어절 앞부분이 5회 이하로 드문데 헷갈리는 자모 하나만 바꾸면 5회 이상·3배 이상 잦은 어절이 되는 경우)하지만 `빅테이블→빅데이블`, `앉는다→않는다`처럼 멀쩡한 희귀 단어를 바꾸는 오탐이 많아 내역을 반드시 검토해야 함 |
-| 쪽 경계 병합 | 쪽 경계에서 잘린 문단을 이을 때 띄어쓰기를 책 전체의 낱말 목록으로 정함(`core/seam_repair.py`). 이은 형태가 책의 다른 곳에 낱말로 나오면 붙이고("순"+"탄하지"→"순탄하지"), 앞 조각이 조사·어미로 끝난 완결된 낱말이면 띄움("삶의"+"의미를"). 조사·어미만 남은 뒤 조각("는", "다.")은 붙임. 쪽 안의 줄바꿈은 기존 접미 규칙 그대로 |
-| 두 줄 제목 | 같은 종류의 제목 블록(`subtitle`, `section_title`)이 연달아 나오면 한 제목으로 이음. 제목 바로 앞의 짧은 본문·캡션(15자 이하, 한글만, 쉼표나 조사로 끝남: "마흔,", "삶에서")은 제목의 첫 줄로 붙임. 앞 제목이 문장부호로 끝나거나 뒤 제목이 번호로 시작하면 그대로 둠 |
-| LLM 교정 | `--proofread`: 쪽마다 산문 섹션(코드·수식·표·그림 제외)을 번호 붙여 Claude에 보내고 `{"fixes":[{"seg","from","to"}]}` 목록만 받음(출력이 짧아 비용은 거의 입력 토큰, 266쪽 약 $1). 적용 전 로컬 검증: `from`이 그 세그먼트에 정확히 한 번 있어야 하고, 길이 차 4 이하·유사도 0.5 이상(문장 고쳐 쓰기 차단), 한글이 들어간 교정만, 수식·코드 스팬 안은 제외. 적용/거부 내역 모두 `{title}_typo_fixes.txt`에 남김. 캐시 `tmp/{title}_NNNN.proof.json`(쪽 텍스트+모델 해시) |
-
-장 표시(`N장`/`Chapter N`)가 한 번도 없는 입력(책에서 한 장만 잘라 변환)은 "Front matter"가 아니라 제목이 `title`인 단일 장으로 조립됩니다.
-- Picture/Figure 블록의 글(모델이 지어낸 그림 설명)은 버립니다. 표는 HTML 그대로 `table` 섹션, 수식은 `$…$` / `$$…$$`로 남습니다. `blocks_raw`(유형+HTML+bbox)가 각 `.ocr.json`에 같이 저장됩니다.
-- 제목 등급은 Marker의 h1/h2가 아니라 **블록 위치**로 정합니다(리플로우 리더는 번호 목록·인용·미주를 큰 글자로 그려서 글자 크기가 단락 성격과 맞지 않습니다). 가운데 정렬 → `section_title`(###), 왼쪽 정렬 → `subtitle`(####), 본문 폭 전체(80% 이상)나 `1. …` 번호 항목 → `body`, 그림 바로 아래 → `caption`, 장 라벨(`Chapter N`, `PART N`, `N장`) → `title`, 숫자만/장식 기호만 → 버림. 장 머리의 작은 "Chapter N" 라벨은 PageHeader로 오는데 조립 단계가 이를 장 시작으로 씁니다.
-- 본문 정리: 각주 참조 번호(`<sup>`)는 버리고, `<li>` 안에 반복된 글머리(`• 항목`)는 하나만 남기며, `1. 항목`/`1 항목` 꼴 항목은 번호 목록으로 냅니다(미주처럼 번호와 글이 다른 `<div>`로 갈라진 항목도 붙임). `full` 스타일은 이제 `<!-- pages: a-b -->` 주석을 넣지 않습니다(`AssembleOptions(page_comments=True)`로 켤 수 있음).
-- 분류 규칙만 바뀌었을 때는 재OCR 없이 `core.datalab_ocr.rebuild_page_structure()`로 기존 `.ocr.json`의 `blocks_raw`에서 섹션을 다시 만들 수 있습니다(과금 0).
+- 조립할 때 사전(`ocr_typos.txt`, 프로젝트 루트와 책 폴더)으로 한글 어절을 고칩니다. 내역은 `{title}_typo_fixes.txt`, 끄려면 `--no-typo-fix`
+- `--proofread`를 주면 Claude가 쪽마다 OCR 오인을 찾아 고칩니다(유료, 266쪽 약 $1). 고친 것과 거부한 것 모두 같은 내역 파일에 남고, `tmp/*.proof.json`에 캐시되어 재조립은 무료입니다
+- `--typo-freq`(책 안 빈도 추정)는 오탐이 많아 권하지 않습니다
 
 필요한 중간 파일이 없으면 **실행할 단계 목록**을 보여 주고 `Proceed? [Y/n]`으로 묻습니다.  
 스크립트·GUI는 `-y` / `--yes`로 건너뜁니다.
@@ -119,13 +108,15 @@ python -m ebook_capture run --title Book --base-dir E:\ebook --text --input-pdf 
 
 리더마다 페이지 넘김·포커스 클릭이 다릅니다. 프로필로 한 번에 맞춥니다.
 
-| 프로필 | 대상 | 넘김 키 / 전달 / 포커스 클릭 |
-|--------|------|-------------------------------|
-| `kindle_app` | Kindle 데스크톱 (**검증 기준선**) | right / sendinput / 2@중앙 |
-| `kindle_cloud` | Kindle Cloud Reader (브라우저) | right / pyautogui / 2@중앙 |
-| `aladin_app` | 알라딘 ebook 앱 | pagedown / sendinput / 2@중앙 |
-| `aladin_web` | 알라딘 웹 뷰어 (Chrome, 2026-11-24 검증) | **wheeldown** (휠 1칸) / pyautogui / 0 (본문 클릭은 메뉴 토글) |
-| `rdp_full` | 원격 데스크톱(mstsc) 창 안의 리더 (client 영역 전체) | right / sendinput / 0 (API 포그라운드) |
+| 프로필 | 대상 | 넘김 키 / 전달 | 포커스 클릭 | PDF 자르기 |
+|--------|------|----------------|-------------|------------|
+| `kindle_app` | Kindle 데스크톱 (**검증 기준선**) | right / sendinput | 0 (API 포그라운드만. 클릭은 본문 링크를 눌러 점프를 일으킴) | top 0.035 |
+| `kindle_cloud` | Kindle Cloud Reader (브라우저) | right / pyautogui | 2 @ 중앙 | 없음 (미측정) |
+| `aladin_app` | 알라딘 ebook 앱 | pagedown / sendinput | 2 @ 중앙 | top 0.010, fill_top 0.026, bottom 0.045 |
+| `aladin_web` | 알라딘 웹 뷰어 (Chrome) | **wheeldown** (휠 1칸) / pyautogui | 0 (본문 클릭은 메뉴 토글) | top 0.058, bottom 0.040 |
+| `rdp_full` | 원격 데스크톱(mstsc) 창 안의 리더 | right / sendinput | 0 (API 포그라운드) | 자동 윤곽 + fill_left 0.01, fill_bottom 0.05 |
+
+프로필별 실기 검증 여부는 [CONTEXT §2](CONTEXT.md).
 
 `rdp_full`은 다른 프로필과 루프가 다릅니다. 원격 리더는 세션 안에서 전체 화면으로 띄우고,
 로컬에서는 mstsc 창을 모니터 높이에 맞춰 둡니다 (2026-10-10 검증: client 1438x1761).
@@ -135,49 +126,26 @@ python -m ebook_capture run --title Book --base-dir E:\ebook --text --input-pdf 
 | `keep_pointer_outside` | true | 포인터가 원격 리더 위를 지나면 hover 툴바가 뜸. 창 옆에 세워 두고 되돌리지 않음 |
 | `settle_stable_sec` / `settle_max_sec` | 0.4 / 4.0 | 키 입력 후 페이지 넘김 바가 사라질 때까지 연속 두 장이 같아질 때까지 재촬영 |
 | `page_turn_retries` | 2 | 화면이 안 바뀌면(포커스 이탈로 키 유실) 재포그라운드 + 키 재전송 후 재촬영 |
-| `pdf_auto_crop` | true | 고정 `pdf_trim` 대신 캡처 완료 후 페이지 공통 윤곽을 뽑아 crop (아래 참고) |
+| `pdf_auto_crop` | true | 고정 `pdf_trim` 대신 캡처 완료 후 페이지 공통 윤곽을 뽑아 crop. 끝까지 남은 리더 툴바도 걸러냄(동작은 [ARCHITECTURE §7](ARCHITECTURE.md#pdf-자르기)). 로그 `PDF_AUTO_CROP`, 끄려면 `--no-pdf-auto-crop` |
 | `prevent_sleep` | true (config 기본) | 캡처 중 화면 보호기·디스플레이 끄기 차단 (`SetThreadExecutionState`) |
 | `--sub-left/--sub-top/--sub-width/--sub-height` (`window_subrect`) | 책마다 | 창 client 영역 중 리더 페이지 부분만 캡처. 원격 세션이 전체 화면(3840x2160)이고 리더가 일부만 차지할 때 사용. 좌표는 `inspect --screenshot`의 probe 기준(물리 픽셀, run과 동일 DPI 모드). width/height 0 = 끝까지. 2026-10-22 검증: 4K 세션 리더 `--sub-left 2 --sub-top 81 --sub-width 1277 --sub-height 1975` |
 | `--pdf-auto-crop-margin` (`pdf_auto_crop_margin`) | 0.0 | 감지한 윤곽을 사방으로 이 비율만큼 넓힘. 본문이 윤곽 끝까지 꽉 차는 리플로우 책(권력중독: 글자 끝 = 크롭선)은 0.005 정도를 주면 안티앨리어싱이 안 잘림 |
 | `stop_repeat_tolerance` | 0.3 (config 기본) | 회색 썸네일 평균 차이가 이 값 이하면 같은 페이지로 봄. 리더 오버레이(화살표 등)는 ~0.003, 실제 넘김은 4 이상. 책 끝 감지와 키 재전송 판단에 공통 사용. 0.0 = 완전 일치 |
 
-`pdf_auto_crop`은 각 PNG의 바깥 테두리를 단계적으로 벗겨 가며 "채워진 상자"(검은 RDP 바에 대비되는 흰 페이지,
-페이지 안의 표지 그림)를 찾고, 페이지마다 가장 바깥의 채워진 상자를 모아 중앙값을 공통 윤곽으로 씁니다.
-배경 있는 페이지(표지, 장 표제지)가 윤곽을 결정하고, 글만 있는 페이지는 윤곽에 영향을 주지 않습니다.
-채워진 상자가 하나도 없으면 전 페이지 내용 상자의 합집합으로 대체합니다. 로그의 `PDF_AUTO_CROP source=…`로
-어느 쪽이 쓰였는지 확인할 수 있고, `--no-pdf-auto-crop`으로 끌 수 있습니다.
-
-두 번째 단계로 리더 크롬을 찾습니다. 상하단 가장자리에서 윤곽의 가로 범위 안 픽셀이 전체 페이지의 30% 이상에서
-똑같이 반복되는 행을 위에서부터 이어 세고, 그 띠에 아이콘이나 글자처럼 균일하지 않은 행이 하나라도 있으면 툴바로
-보고 잘라냅니다 (`chrome=(top …, bottom …)` 로그). 캡처 도중에 떠서 끝까지 남은 툴바도 이 방식으로 걸러집니다.
-균일한 색 행만 쌓인 띠는 표지나 장 표제지 디자인으로 보고 건드리지 않습니다.
-
-공통 기본값 (`kindle_app`에서 검증 후 전 프로필에 공유):
+프로필이 따로 정하지 않으면 쓰는 공통값(`_proven_capture_defaults`):
 
 | 항목 | 기본 | 설명 |
 |------|------|------|
 | `fit_on_start` | 끔 | 시작 시 창 resize 안 함 (미리 배치) |
 | `start_focus_clicks` | 0 | 시작 시 포커스 클릭 없음 |
-| `reader_focus_clicks` | 2 | 캡처 **직전** 본문 클릭 |
+| `reader_focus_clicks` | 2 | 캡처 **직전** 본문 클릭 (`kindle_app`·`aladin_web`·`rdp_full`은 0) |
 | `reader_focus_x_ratio` / `_y_ratio` | 0.5 / 0.5 | 클릭 위치 (본문 중앙) |
 | `focus_click_settle_sec` | 1.0 | 클릭 후 오버레이 사라질 대기 |
-| `pdf_trim` | Kindle top=0.032 / Aladin top=0.010·fill_top=0.026·bottom=0.045 | crop + optional white-fill |
+| `pdf_trim` | 프로필마다 (`reader_profiles.jsonc`) | crop + optional white-fill |
 
-페이지 한 장의 처리 순서는 다음과 같습니다.
+페이지마다 "본문 클릭 → 포인터 대피·대기 → 캡처 → 넘김 키"를 반복합니다(세부는 [ARCHITECTURE §5.3](ARCHITECTURE.md#53-페이지-루프-pipeline_run_phase_capture)). 클릭 위치는 중앙이 안전합니다. 상단은 툴바, 좌우 가장자리는 페이지 이동 영역입니다. 클릭 간격은 더블클릭 시간보다 길게 벌려 보내므로 `reader_focus_clicks: 2`도 줌이 되지 않습니다.
 
-1. 본문 중앙을 `reader_focus_clicks`회 클릭 (리더 포커스 확보)
-2. 포인터를 캡처 영역 밖으로 빼고 `focus_click_settle_sec` 대기 — 페이지 화살표·툴바가 사라짐
-3. 이미지 캡처
-4. `next_key` 전송 후 `delay_sec` 대기
-
-클릭은 같은 지점을 연속으로 누르므로 시스템 더블클릭 시간(`GetDoubleClickTime`)보다 길게
-벌려 보냅니다. 그래서 `reader_focus_clicks: 2`도 더블클릭(= Kindle 이미지 줌)이 되지 않습니다.
-클릭 위치는 중앙이 안전합니다. 상단은 툴바, 좌우 가장자리는 페이지 이동 영역입니다.
-
-`kindle_app`은 `pdf_trim.top = 0.032`(앱 상단 바 crop). `aladin_app`은
-`top = 0.010`(얇은 title strip crop) + `fill_top = 0.026`(툴바 **white fill**) +
-`bottom = 0.045`(하단 nav crop). `fill_*`는 잘라내지 않고 해당 띠만 흰색으로
-덮어 상단 여백을 유지합니다. 창 높이를 크게 바꿨다면 비율을 다시 맞추세요.
+`pdf_trim`의 `left/right/top/bottom`은 잘라내고, `fill_*`는 잘라내지 않고 그 띠만 흰색으로 덮어 여백을 유지합니다. 값은 캡처 크기에 대한 비율이라, 창 높이를 크게 바꿨다면 다시 측정하세요. 책 config의 `pdf_trim`은 프로필 값에 덮이므로 측정값은 프로필에 넣습니다.
 
 ```powershell
 ebook-capture run --config default_config.jsonc --reader kindle_app -y
@@ -188,30 +156,28 @@ ebook-capture test-key --config default_config.jsonc --reader aladin_app
 - 정의 파일: `reader_profiles.jsonc` (직접 수정·추가 가능)
 - 개별 옵션(`--next-key` 등)이 프로필보다 **우선**
 
-### Kindle에서 줌만 될 때
+### 문제 해결
 
-Cloud Reader는 **상단을 클릭하면 Aa/줌 툴바**가 열립니다. 프로필은 이미 **본문 중앙**
-클릭을 쓰므로 보통 괜찮습니다. 그래도 툴바가 뜨면 `reader_focus_clicks`를 1 또는 0으로
-낮추고, 본문을 한 번 수동 클릭한 뒤 Start 하세요.
+자주 겪는 경우만 적습니다. 원인과 코드 쪽 해결은 [ARCHITECTURE §12](ARCHITECTURE.md#12-발견한-문제--해결책).
 
-표지처럼 이미지 페이지에서 줌이 걸리면 클릭이 더블클릭으로 들어간 경우입니다. 지금은 클릭
-간격이 더블클릭 시간보다 길게 조정되어 있으니, 그래도 줌이 되면 `reader_focus_clicks`를 1 또는
-0으로 낮추세요.
+#### 줌·메뉴가 뜨거나 엉뚱한 쪽으로 점프할 때
 
-### 페이지가 안 넘어갈 때
+포커스 클릭이 원인입니다. Cloud Reader는 상단을 클릭하면 Aa/줌 툴바가, Kindle 앱은 이미지를 두 번 누르면 줌이, 본문 링크를 누르면 점프가 일어납니다. `reader_focus_clicks`를 0으로 두고(키만 보냄) 시작 전에 본문을 한 번 직접 클릭해 두세요.
+
+#### 페이지가 안 넘어갈 때
 
 `--debug-capture`를 붙이면 키를 보낸 뒤 화면이 실제로 바뀌었는지 로그로 알려줍니다.
 
 ```powershell
-python -m ebook_capture run --config default_config.jsonc --reader kindle_app --debug-capture -y
+python -m ebook_capture run --config default_config.jsonc --reader kindle_app --pages 4 --debug-capture -y
 ```
 
 `DEBUG_KEY_EFFECT meandiff=... (page moved)`면 정상, `NO VISIBLE CHANGE`면 키가 리더에
 전달되지 않았거나 리더가 무시한 것입니다. 후자라면 `key_delivery`를 `pyautogui`로 바꿔
-보세요. 캡처 중에는 다른 창을 클릭하지 마세요. 리더가 포그라운드에서 벗어나면 다시
+보세요. 웹 뷰어가 키를 아예 무시하면 `--next-key wheeldown`(캡처 영역 중앙에서 휠 1칸)을 쓰세요. 캡처 중에는 다른 창을 클릭하지 마세요. 리더가 포그라운드에서 벗어나면 다시
 활성화하는 과정에서 페이지 넘김이 한 번 빠질 수 있습니다.
 
-### 첫 페이지가 로딩 화면으로 찍힐 때
+#### 첫 페이지가 로딩 화면으로 찍힐 때
 
 첫 캡처 전에 `delay_sec`만큼 기다립니다(로그 `CAPTURE_SETTLE`). 리더가 느리면 `delay_sec`를
 올리세요.
@@ -246,7 +212,11 @@ python -m ebook_capture run --config default_config.jsonc --reader kindle_app --
 | 옵션 | 설명 |
 |------|------|
 | `--capture-mode` | `manual` \| `window_*` \| `screen_left_third` |
-| `--window-title` | 창 제목 부분 일치 |
+| `--window-title` | 창 제목 부분 일치 (`--window-match-first`: 여럿이면 첫 창) |
+| `--window-capture-backend` | `printwindow` \| `screen` |
+| `--sub-left/--sub-top/--sub-width/--sub-height` | 창 client 안 부분 영역만 캡처 (`rdp_full` 참고) |
+| `--capture-scale F` / `--capture-monitor N` | 캡처 전 리더 창을 F배로 키움(비율 유지) / 그 모니터에 배치 (`monitors`로 번호 확인) |
+| `--debug-capture` / `--debug-max-pages N` | 키 효과 로그(`DEBUG_KEY_EFFECT`) / N쪽까지만 |
 | `--active-window` | 현재 활성 창 사용 |
 | `--delay` | 페이지 넘긴 뒤 대기(초) |
 | `--next-key` | `pagedown` \| `right` \| … |
@@ -256,7 +226,8 @@ python -m ebook_capture run --config default_config.jsonc --reader kindle_app --
 
 | 옵션 | 설명 |
 |------|------|
-| `--ocr-engine google\|datalab` | OCR 백엔드 (기본 google = Gemini) |
+| `--ocr-engine google\|anthropic\|datalab` | OCR 백엔드 (기본 google = Gemini) |
+| `--anthropic-ocr-model` | Claude Vision 모델 (기본 `claude-haiku-4-5-20251001`) |
 | `--datalab-mode fast\|balanced\|accurate` | Datalab 정확도 (기본 accurate) |
 | `--ocr-workers N` | OCR 동시 요청 수 (1-16, 기본 1) |
 | `--no-typo-fix` | 조립 시 OCR 오타 사전 보정 끄기. 기본은 켜짐, 내역은 `{title}_typo_fixes.txt` |
@@ -267,6 +238,14 @@ python -m ebook_capture run --config default_config.jsonc --reader kindle_app --
 | `--ocr-prompt` / `--ocr-prompt-file` | Gemini 프롬프트 |
 | `--resume` / `--no-resume` | 완료 페이지 건너뛰기 |
 | `--force-phase capture\|ocr\|pdf\|all` | 해당 단계 강제 재실행 |
+
+### PDF
+
+| 옵션 | 설명 |
+|------|------|
+| `--pdf-auto-crop` / `--no-pdf-auto-crop` | 공통 윤곽 자동 crop 켜기/끄기 (프로필 값보다 우선) |
+| `--pdf-auto-crop-margin R` | 감지한 윤곽을 사방으로 R(0–0.2)만큼 넓힘 |
+| `--pdf-page-margin R` | PDF 쪽 사방에 흰 여백 R(0–0.2) 추가 |
 
 전체 목록: `python -m ebook_capture run --help`
 
@@ -323,6 +302,9 @@ PDF 여백(`pdf_trim`)은 리더 프로필에 둡니다. crop + 선택적 white-
   {title}.pdf
   {title}.md
   {title}_structure.json
+  {title}_typo_fixes.txt        # 오타 교정 내역 (text)
+  assets/<sha1>.jpg|png         # 그림 (Datalab)
+  {title}.notes.json            # 웹 리더의 주석 (리더가 씀)
   capture_state.json
 ```
 
@@ -356,7 +338,9 @@ GOOGLE_API_TRUST_MODE=auto
 | `system` | 사내망 / Windows 인증서 |
 | `certifi` | 일반 인터넷 |
 
-추가 CA: `GOOGLE_API_CA_BUNDLE=회사루트.cer` (Datalab 호출도 같은 CA 설정을 씁니다)
+추가 CA: `GOOGLE_API_CA_BUNDLE=회사루트.cer` (Claude·Datalab 호출도 같은 CA 설정을 씁니다). Windows 루트 저장소에서 `certutil -store Root <sha1> 회사루트.cer`로 내보낼 수 있습니다.
+
+Claude(`--ocr-engine anthropic`, `--proofread`): `ANTHROPIC_API_KEY=...`
 
 Datalab(`--ocr-engine datalab`): `DATALAB_API_KEY=...` (https://www.datalab.to 발급, 선불 크레딧). 환경변수 → `.env` 순으로 찾고 자리표시자 `your-datalab-api-key-here`는 없는 것으로 봅니다.
 
@@ -367,6 +351,9 @@ OCR(`--text`)을 쓸 때만 필요합니다. `--images` / `--pdf`만이면 API �
 ## 9. 진단
 
 ```powershell
+# 모니터 번호
+python -m ebook_capture monitors
+
 # 창이 left-third에 맞는지, 캡처 rect 확인
 python -m ebook_capture inspect --config default_config.jsonc
 

@@ -157,7 +157,7 @@ class ReaderProfile:
 def _proven_capture_defaults(pdf_trim: PdfTrim | None = None) -> dict[str, Any]:
     """Defaults proven on Kindle for PC; shared by all built-in profiles.
 
-    Per-page loop (see ``pipeline._run_phase_capture`` / REQUIREMENTS §12):
+    Per-page loop (see ``pipeline._run_phase_capture`` / docs/ARCHITECTURE.md §5.3, §12):
     center clicks → park pointer → settle → capture → next_key → delay.
     """
     return {
@@ -223,7 +223,7 @@ _RDP_PAGE_TURN_RETRIES = 2
 #
 # Only fields that *differ* from ``_proven_capture_defaults`` are set explicitly
 # (next_key, key_delivery, title, pdf_trim, notes). Re-verify each profile with
-# ``--debug-capture`` when tuning (see docs/CONTEXT.md).
+# ``--debug-capture`` when tuning (see docs/ARCHITECTURE.md §12).
 _BUILTIN_PROFILES: tuple[ReaderProfile, ...] = (
     ReaderProfile(
         name="kindle_app",

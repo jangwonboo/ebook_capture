@@ -43,6 +43,8 @@ def test_apply_kindle_app_profile() -> None:
         "bottom": 0.0,
         "fill_top": 0.0,
         "fill_bottom": 0.0,
+        "fill_left": 0.0,
+        "fill_right": 0.0,
     }
     assert changed
 
@@ -149,7 +151,11 @@ def test_apply_rdp_full_profile(tmp_path) -> None:
     assert cfg.settle_max_sec == 4.0
     assert cfg.page_turn_retries == 2
     # Crop is learned from the captured pages, not fixed.
-    assert cfg.pdf_trim.is_active() is False
+    # No fixed crop: pdf_auto_crop finds the page outline. Only white fill
+    # (left 1%, bottom 5%) masks the remote reader's edge strip and footer.
+    trim = cfg.pdf_trim
+    assert (trim.left, trim.right, trim.top, trim.bottom) == (0.0, 0.0, 0.0, 0.0)
+    assert (trim.fill_left, trim.fill_bottom) == (0.010, 0.050)
     assert cfg.pdf_auto_crop is True
     assert cfg.pdf_auto_crop_margin == 0.0
     cfg.validate()

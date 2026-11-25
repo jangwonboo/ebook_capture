@@ -28,21 +28,14 @@ The reader opens one book (a Markdown file, ideally its whole folder) from a des
 
 ## Capabilities and Constraints
 
-- Accept Markdown through the file picker or drag and drop.
-- Keep reading position, saved positions, read marks, and annotations in `<book>.notes.json` inside the book folder when the folder was opened with write access (Chrome/Edge), and always in browser local storage as a second copy. Reading settings stay in the browser.
-- No account, server, or collaboration. Nothing leaves the browser unless the reader turns on AI Q&A (below).
-- Opening or dropping the book folder follows the Markdown's relative image links; a Markdown file opened alone shows images only when they are selected with it, because a browser cannot read paths next to a picked file.
-- Two same-level sub-headings in a row with no text between them are read as one heading split by OCR and joined.
-- Text cut by page breaks is rejoined when the book is read: a body paragraph that stops without sentence punctuation continues into the next one (the book's own vocabulary decides whether the seam needs a space), and a short dangling phrase right before a sub-heading becomes that heading's first line. The Markdown file itself is not changed.
-- Annotations: highlight selected text in four colours, attach a memo with `#tags`, and filter the right-hand panel by scope, colour, kind and tag. Export to Markdown or JSON; import JSON.
-- AI Q&A (opt-in): ask Claude about a selected passage. The browser calls the Anthropic API directly with a key the reader enters in Settings; each question sends the passage, the current chapter, the book title and outline, and that annotation's earlier turns. Answers link to the source sentences they cite and can be adopted as the annotation. Default model: Claude Sonnet 5.5.
-- The API key lives only in the browser (memory, or local storage when the reader chooses to remember it). It is never written to the notes file or exports.
-- Body font choice: Noto Serif KR, Pretendard, KoPub Batang, KoPub Dotum. Installed fonts are used first.
+- Open a book folder (or a Markdown file) without a server; images follow the Markdown's relative links when the folder is opened.
+- Heading tree, one chapter per screen, search, saved positions, fonts, sizes, themes.
+- Annotations: highlights, memos with `#tags`, filters, Markdown/JSON export. Stored in `<book>.notes.json` in the book folder (Chrome/Edge with write access) and in browser storage as a second copy.
+- Opt-in AI Q&A about a selected passage; the browser calls the Anthropic API with a key entered in Settings. Answers cite the source sentences and can be adopted as the annotation. Default model Claude Sonnet 5.5.
+- The API key never goes into the notes file or exports.
+- OCR fixes belong to the capture pipeline; the reader only bridges text cut by page breaks in books already produced.
 
-## Evidence on Hand
-
-- Functional plan: `docs/기능기획.md`; annotations, saving and AI Q&A: `docs/추가기획.md`.
-- Example scanned book sources outside the repository are used only as a design and content-shape reference.
+Full specification, decisions and backlog: `SPEC.md`.
 
 ## Product Principles
 

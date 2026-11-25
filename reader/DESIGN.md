@@ -6,8 +6,10 @@ An editorial reading room: warm paper, ink-black type, a restrained evergreen si
 
 ## Typography
 
-- Display and book titles use `Noto Serif KR` when available, then Korean serif fallbacks.
-- UI labels and dense controls use `Noto Sans KR` and system sans fallbacks.
+- The product name shown in the top bar is "Markdown Reader".
+- Body text uses the reader-chosen font (default `Noto Serif KR`).
+- All interface text (menus, tabs, buttons, panels) uses `Pretendard`, whatever body font is chosen.
+- Sizes: menus are fixed at 12pt; body, left panes and the notes list share one adjustable size (default 12pt, 9–20pt). Secondary text inside each area is a fixed fraction of it.
 - Long-form text has a deliberately narrow measure and generous leading.
 
 ## Tokens

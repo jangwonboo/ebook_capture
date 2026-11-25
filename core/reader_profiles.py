@@ -205,6 +205,15 @@ _ALADIN_APP_BOTTOM_NAV_RATIO = 0.045
 _ALADIN_WEB_TOP_BROWSER_UI_RATIO = 0.058
 _ALADIN_WEB_BOTTOM_FOOTER_RATIO = 0.040
 
+# Aladin PDF-type books open in a different web viewer (/pdfViewer/). Keys and
+# the wheel do nothing there; the on-screen ">" arrow at the right edge turns
+# the page, and a click on the page only shows the menu (title bar, bottom
+# toolbar, side arrows), which then stays up. All of it lies outside the page,
+# so a fixed trim removes it. Measured 2026-11-25 on a 1294x2167 Chrome window
+# at 107% zoom (book: 디자인 심리 108); re-measure for another window size.
+_ALADIN_PDF_NEXT_ARROW = "click:0.965,0.527"
+_ALADIN_PDF_PAGE_TRIM = PdfTrim(left=0.054, right=0.054, top=0.155, bottom=0.098)
+
 # Reader inside an RDP session (mstsc window). The remote reader draws its own
 # page-turn toolbar for a moment after each key and on any pointer motion, so
 # the pointer stays parked beside the window and each shot is repeated until
@@ -290,6 +299,24 @@ _BUILTIN_PROFILES: tuple[ReaderProfile, ...] = (
                 )
             ),
             "reader_focus_clicks": 0,
+        },
+    ),
+    ReaderProfile(
+        name="aladin_pdf",
+        label="Aladin web viewer for PDF books (browser, /pdfViewer/)",
+        note=(
+            "PDF-type books: keys and the wheel are ignored; a click on the "
+            "right-edge arrow turns the page. Show the menu (click the page once) "
+            "before starting. pdf_trim keeps only the page; measured on a "
+            "1294x2167 window at 107% zoom (2026-11-25)."
+        ),
+        next_key=_ALADIN_PDF_NEXT_ARROW,
+        key_delivery=KEY_DELIVERY_PYAUTOGUI,
+        **{
+            **_proven_capture_defaults(_ALADIN_PDF_PAGE_TRIM),
+            "reader_focus_clicks": 0,
+            # If the menu had hidden itself, the first click only shows it.
+            "page_turn_retries": 2,
         },
     ),
     ReaderProfile(

@@ -121,6 +121,28 @@
       "pdf_trim": { "left": 0.0, "right": 0.0, "top": 0.058, "bottom": 0.04 }
     },
     {
+      "name": "aladin_pdf",
+      "label": "Aladin web viewer for PDF books (browser, /pdfViewer/)",
+      "note": "PDF형 책 뷰어(주소에 /pdfViewer/). 키·휠 무시, 오른쪽 가장자리 > 화살표 클릭으로 넘김. 시작 전에 본문을 한 번 눌러 메뉴를 띄워 둘 것(메뉴는 페이지 밖이라 trim으로 잘림). trim은 1294x2167 창·107% 확대에서 측정(2026-11-25).",
+      "capture_mode": "screen_left_third",
+      "next_key": "click:0.965,0.527",
+      "key_delivery": "pyautogui",
+      "reader_focus_clicks": 0,
+      "reader_focus_x_ratio": 0.5,
+      "reader_focus_y_ratio": 0.5,
+      "focus_click_settle_sec": 1.0,
+      "window_capture_backend": "screen",
+      "use_window_client_rect": true,
+      "hide_cursor_during_capture": true,
+      "delay_sec": 2.0,
+      "fit_on_start": false,
+      "start_focus_clicks": 0,
+      "start_focus_x_ratio": 0.5,
+      "start_focus_y_ratio": 0.5,
+      "page_turn_retries": 2,
+      "pdf_trim": { "left": 0.054, "right": 0.054, "top": 0.155, "bottom": 0.098 }
+    },
+    {
       "name": "rdp_full",
       "label": "Reader inside a Remote Desktop window (full RDP client area)",
       "note": "mstsc client 영역 전체 캡처. 원격 리더는 세션 안에서 전체 화면. 클릭 없음(API 포그라운드), 포인터는 창 옆에 고정, 오버레이가 사라질 때까지 재촬영, 페이지가 안 움직이면 키 재전송. PDF crop은 캡처본에서 자동 추출(pdf_auto_crop).",

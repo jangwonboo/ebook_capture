@@ -113,7 +113,8 @@ Datalab 메모:
 | `kindle_app` | Kindle 데스크톱 (**검증 기준선**) | right / sendinput | 0 (API 포그라운드만. 클릭은 본문 링크를 눌러 점프를 일으킴) | top 0.035 |
 | `kindle_cloud` | Kindle Cloud Reader (브라우저) | right / pyautogui | 2 @ 중앙 | 없음 (미측정) |
 | `aladin_app` | 알라딘 ebook 앱 | pagedown / sendinput | 2 @ 중앙 | top 0.010, fill_top 0.026, bottom 0.045 |
-| `aladin_web` | 알라딘 웹 뷰어 (Chrome) | **wheeldown** (휠 1칸) / pyautogui | 0 (본문 클릭은 메뉴 토글) | top 0.058, bottom 0.040 |
+| `aladin_web` | 알라딘 웹 뷰어 (Chrome, 리플로우 책) | **wheeldown** (휠 1칸) / pyautogui | 0 (본문 클릭은 메뉴 토글) | top 0.058, bottom 0.040 |
+| `aladin_pdf` | 알라딘 웹 뷰어 (Chrome, PDF형 책: 주소에 `/pdfViewer/`) | **click:0.965,0.527** (오른쪽 `›` 화살표 클릭) / pyautogui | 0 | 페이지만 남김: 좌우 0.054, top 0.155, bottom 0.098 (1294×2167 창, 107% 확대에서 측정) |
 | `rdp_full` | 원격 데스크톱(mstsc) 창 안의 리더 | right / sendinput | 0 (API 포그라운드) | 자동 윤곽 + fill_left 0.01, fill_bottom 0.05 |
 
 프로필별 실기 검증 여부는 [CONTEXT §2](CONTEXT.md).
@@ -174,7 +175,7 @@ python -m ebook_capture run --config default_config.jsonc --reader kindle_app --
 
 `DEBUG_KEY_EFFECT meandiff=... (page moved)`면 정상, `NO VISIBLE CHANGE`면 키가 리더에
 전달되지 않았거나 리더가 무시한 것입니다. 후자라면 `key_delivery`를 `pyautogui`로 바꿔
-보세요. 웹 뷰어가 키를 아예 무시하면 `--next-key wheeldown`(캡처 영역 중앙에서 휠 1칸)을 쓰세요. 캡처 중에는 다른 창을 클릭하지 마세요. 리더가 포그라운드에서 벗어나면 다시
+보세요. 웹 뷰어가 키를 아예 무시하면 `--next-key wheeldown`(휠 1칸)을, 휠도 무시하면 화면의 다음 쪽 화살표 위치를 `--next-key click:X,Y`로 주세요(알라딘 PDF형 책은 `--reader aladin_pdf`). 캡처 중에는 다른 창을 클릭하지 마세요. 리더가 포그라운드에서 벗어나면 다시
 활성화하는 과정에서 페이지 넘김이 한 번 빠질 수 있습니다.
 
 #### 첫 페이지가 로딩 화면으로 찍힐 때
@@ -191,7 +192,7 @@ python -m ebook_capture run --config default_config.jsonc --reader kindle_app --
 | 옵션 | 의미 |
 |------|------|
 | `--images` / `--pdf` / `--text` | 출력 타입 (하나만) |
-| `--next-key` | 넘김 키. `pagedown`·`right` 등 키 이름 또는 `wheeldown`/`wheelup` (캡처 영역 중앙에서 휠 1칸, 키 입력을 무시하는 웹 뷰어용) |
+| `--next-key` | 넘김 키. `pagedown`·`right` 등 키 이름, `wheeldown`/`wheelup`(캡처 영역 중앙에서 휠 1칸), 또는 `click:X,Y`(캡처 영역의 가로 X·세로 Y 비율 위치를 클릭; 화면의 다음 쪽 화살표를 누르는 뷰어용) |
 | `--output images\|pdf\|text` | 위와 동일 |
 | `--style full\|prose\|raw` | Markdown 스타일 (`--text`) |
 | `-y`, `--yes` | 확인 생략 |

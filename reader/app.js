@@ -259,8 +259,8 @@ if (typeof document !== 'undefined') (() => {
   const { PAGE_LEVEL, slugify, parseBook } = Yeobaek;
   const $ = (selector) => document.querySelector(selector);
   const els = {
-    fileInput: $('#file-input'), open: $('#open-button'), welcomeOpen: $('#welcome-open'), bookTitle: $('#book-title'),
-    folderInput: $('#folder-input'), folderButton: $('#folder-button'), welcomeFolder: $('#welcome-folder'),
+    fileInput: $('#file-input'), open: $('#open-button'), bookTitle: $('#book-title'),
+    folderInput: $('#folder-input'), folderButton: $('#folder-button'),
     chooser: $('#chooser'), chooserList: $('#chooser-list'), chooserCancel: $('#chooser-cancel'), fontSelect: $('#font-select'),
     sideToggle: $('#side-toggle'), grip: $('#grip'), scrim: $('#scrim'),
     tabs: [...document.querySelectorAll('.tab')], paneToc: $('#pane-toc'),
@@ -273,7 +273,7 @@ if (typeof document !== 'undefined') (() => {
   };
   const state = {
     book: null, bookId: '', page: -1, activeId: '', open: new Set(), read: new Set(), saved: [],
-    files: new Map(), names: new Map(), urls: new Map(), baseDir: '', dir: null, sourceName: '', spyLockUntil: 0, toastTimer: null, font: 18,
+    files: new Map(), names: new Map(), urls: new Map(), baseDir: '', dir: null, sourceName: '', spyLockUntil: 0, toastTimer: null, font: 12,
   };
   const narrow = window.matchMedia('(max-width:720px)');
   // notes.js (annotations, notes file, AI) plugs in here; the reader works without it.
@@ -578,12 +578,14 @@ if (typeof document !== 'undefined') (() => {
 
   /* ---------- Reading settings ---------- */
 
+  // Text size in points for the body, the left panes and the notes panel; menus stay at 12pt.
+  const FONT_MIN = 9; const FONT_MAX = 20; const FONT_DEFAULT = 12;
   function setFont(size, announce = true) {
-    state.font = Math.max(14, Math.min(size, 26));
-    document.documentElement.style.setProperty('--reader-size', `${state.font}px`);
-    els.fontDown.disabled = state.font <= 14; els.fontUp.disabled = state.font >= 26;
-    store.set('font', state.font);
-    if (announce) notify(`글자 크기 ${state.font}px`);
+    state.font = Math.max(FONT_MIN, Math.min(size, FONT_MAX));
+    document.documentElement.style.setProperty('--reader-size', `${state.font}pt`);
+    els.fontDown.disabled = state.font <= FONT_MIN; els.fontUp.disabled = state.font >= FONT_MAX;
+    store.set('fontPt', state.font);
+    if (announce) notify(`글자 크기 ${state.font}pt`);
   }
   // Installed fonts are used first; `css` is fetched only as a fallback source for machines without them.
   const FONTS = {
@@ -622,7 +624,7 @@ if (typeof document !== 'undefined') (() => {
     const storedOpen = store.get(bookKey('open'), null);
     state.open = new Set(storedOpen || (book.roots.length <= 8 ? book.roots.map((n) => n.id) : []));
 
-    els.bookTitle.textContent = book.title; document.title = `${book.title} — 여백`;
+    els.bookTitle.textContent = book.title; document.title = `${book.title} — Markdown Reader`;
     els.welcome.hidden = true; els.readerView.hidden = false;
     els.tocFilter.value = ''; els.search.value = '';
     renderTree(); renderSaved(); runSearch(); switchTab('toc');
@@ -731,8 +733,8 @@ if (typeof document !== 'undefined') (() => {
 
   /* ---------- Events ---------- */
 
-  [els.open, els.welcomeOpen].forEach((button) => button.addEventListener('click', () => els.fileInput.click()));
-  [els.folderButton, els.welcomeFolder].forEach((button) => button.addEventListener('click', openFolder));
+  els.open.addEventListener('click', () => els.fileInput.click());
+  els.folderButton.addEventListener('click', openFolder);
   [els.fileInput, els.folderInput].forEach((input) => input.addEventListener('change', () => { openEntries(fromFileList(input.files)); input.value = ''; }));
   els.chooserCancel.addEventListener('click', () => els.chooser.close());
   els.fontSelect.addEventListener('change', () => setReaderFont(els.fontSelect.value, true));
@@ -868,7 +870,7 @@ if (typeof document !== 'undefined') (() => {
 
   const savedTheme = store.get('theme', '');
   setTheme(THEMES.includes(savedTheme) ? savedTheme : '');
-  setFont(Number(store.get('font', 18)) || 18, false);
+  setFont(Number(store.get('fontPt', FONT_DEFAULT)) || FONT_DEFAULT, false);
   setReaderFont(store.get('fontFamily', 'serif'));
   const savedWidth = Number(store.get('sideWidth', 0)); if (savedWidth) setSideWidth(savedWidth, false);
   if (store.get('sideCollapsed', false) && !narrow.matches) toggleSidebar();

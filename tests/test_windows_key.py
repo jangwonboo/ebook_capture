@@ -129,3 +129,35 @@ def test_deliver_vk_respects_delivery_mode(monkeypatch: pytest.MonkeyPatch) -> N
     assert ok is True
     assert calls == ["postmessage:256"]
     assert "PostMessage top" in detail
+
+
+def test_click_point_pseudo_key() -> None:
+    from core.windows_util import click_point_for_key, wheel_notches_for_key
+
+    assert click_point_for_key("click:0.965,0.527") == (0.965, 0.527)
+    assert click_point_for_key(" CLICK:0.5,0.5 ") == (0.5, 0.5)
+    for bad in ("click:", "click:1.2,0.5", "click:a,b", "right", "wheeldown", ""):
+        assert click_point_for_key(bad) is None, bad
+    # A click key is neither a wheel notch nor a virtual key.
+    assert wheel_notches_for_key("click:0.9,0.5") == 0
+    assert _vk_for_key("click:0.9,0.5") is None
+
+
+def test_click_is_delivered_at_rect_ratio(monkeypatch: pytest.MonkeyPatch) -> None:
+    import types
+
+    from core import windows_util as wu
+
+    calls: list[tuple] = []
+    fake = types.SimpleNamespace(
+        position=lambda: types.SimpleNamespace(x=5, y=6),
+        moveTo=lambda x, y: calls.append(("move", x, y)),
+        click=lambda x, y: calls.append(("click", x, y)),
+    )
+    monkeypatch.setitem(sys.modules, "pyautogui", fake)
+    monkeypatch.setattr(wu.time, "sleep", lambda _s: None)
+    ok, detail = wu._deliver_click_to_rect((810, -2160, 1278, 2159), (0.965, 0.527))
+    assert ok
+    assert ("click", 810 + 1233, -2160 + 1138) in calls
+    assert calls[-1] == ("move", 5, 6)  # pointer restored
+    assert "via=click" in detail

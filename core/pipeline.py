@@ -184,9 +184,12 @@ def _send_page_turn_key(cfg: CaptureConfig, progress: ProgressFn | None) -> None
 
     if cfg.capture_mode == CAPTURE_MANUAL:
         notches = wu.wheel_notches_for_key(cfg.next_key)
+        point = wu.click_point_for_key(cfg.next_key)
+        l, t, w, h = cfg.rect.as_tuple()
         if notches:
-            l, t, w, h = cfg.rect.as_tuple()
             pyautogui.scroll(notches, l + w // 2, t + h // 2)
+        elif point is not None:
+            pyautogui.click(l + int(round(w * point[0])), t + int(round(h * point[1])))
         else:
             pyautogui.press(cfg.next_key)
         return

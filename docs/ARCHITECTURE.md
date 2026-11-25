@@ -20,7 +20,7 @@ Windows에서 전자책 리더(앱/웹/원격 데스크톱) 화면을 연속 캡
 
 - 영역: `manual` | `window_full` | `window_left_third` | `window_right_third` | `screen_left_third`, 창 안 부분 영역(`window_subrect`)
 - 시작 시 창 resize/포커스는 옵션 (`fit_on_start`, `start_focus_clicks`, `capture_scale`; 기본 끔)
-- 페이지 넘김: `next_key`(키 이름 또는 `wheeldown`/`wheelup`) + `key_delivery` (SendInput / PostMessage / PyAutoGUI / auto)
+- 페이지 넘김: `next_key`(키 이름, `wheeldown`/`wheelup`, 또는 `click:X,Y` = 캡처 영역 비율 위치 클릭) + `key_delivery` (SendInput / PostMessage / PyAutoGUI / auto)
 - 포커스: 시작 1회(`start_focus_clicks`)와 **캡처 직전** 매 페이지(`reader_focus_clicks`) 분리. 클릭 위치 `reader_focus_x_ratio`/`_y_ratio`, 클릭 후 포인터를 캡처 밖으로 빼고 `focus_click_settle_sec` 대기
 - 안정화: 연속 두 장이 같아질 때까지 재촬영(`settle_stable_sec`/`settle_max_sec`), 화면이 안 바뀌면 재포그라운드 + 키 재전송(`page_turn_retries`)
 - 책 끝 감지: 회색 썸네일 평균 차이 ≤ `stop_repeat_tolerance`(기본 0.3)가 반복되면 끝
@@ -410,6 +410,7 @@ pytest            # 또는 run_tests.cmd
 |--|--|
 | **증상** | `right`/`pagedown`/`space`를 pyautogui·SendInput 어느 쪽으로 보내도 meandiff 0. 본문 클릭은 메뉴 오버레이 토글 |
 | **해결** | `next_key=wheeldown`(캡처 영역 중앙에서 휠 1칸), `reader_focus_clicks=0`. 물리 키보드는 되는데 주입 키가 왜 막히는지는 미해결 |
+| **PDF형 책** | 주소가 `/pdfViewer/`인 책은 뷰어가 달라 휠도 무시한다. 본문 클릭은 메뉴를 띄우고 다시 눌러도 꺼지지 않는다. 오른쪽 가장자리 `›` 화살표 클릭으로 넘긴다(`aladin_pdf`: `next_key=click:0.965,0.527`, 메뉴가 숨어 첫 클릭이 메뉴만 띄울 때를 위해 `page_turn_retries=2`). 메뉴는 모두 페이지 밖이라 고정 `pdf_trim`으로 자른다. 회색·흰 페이지가 섞여 배경과 차이가 작아 `pdf_auto_crop`은 페이지를 못 찾는다 |
 
 ### 12.10 끝 감지가 안 걸리거나 너무 일찍 걸림
 

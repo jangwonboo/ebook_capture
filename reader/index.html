@@ -4,10 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#eef0eb" />
-    <title>여백 — Local eBook Reader</title>
+    <title>Markdown Reader</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Serif+KR:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <!-- UI font. An installed Pretendard is used first; this is the fallback source. -->
+    <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -16,7 +18,7 @@
     <div class="shell">
       <header class="topbar">
         <button id="side-toggle" class="icon-button" type="button" aria-label="탐색 패널 열기/닫기" aria-controls="sidebar" aria-expanded="true" title="탐색 패널">☰</button>
-        <span class="brand">여백<span>·</span></span>
+        <span class="brand">Markdown Reader</span>
         <span id="book-title" class="book-title"></span>
         <div class="top-actions">
           <button id="folder-button" class="quiet-button" type="button" title="책 폴더를 열면 Markdown의 이미지 링크를 따라 그림을 표시합니다">폴더 열기</button>
@@ -50,7 +52,7 @@
               <button id="expand-all" class="text-button" type="button">모두 펼치기</button>
               <button id="collapse-all" class="text-button" type="button">모두 접기</button>
             </div>
-            <div id="tree" class="tree"><p class="empty-copy">Markdown 파일을 열면 목차가 여기에 나타납니다.</p></div>
+            <div id="tree" class="tree"></div>
           </div>
 
           <div id="pane-search" class="pane" role="tabpanel" aria-labelledby="tab-search" hidden>
@@ -72,14 +74,7 @@
 
         <main class="main">
           <div id="welcome" class="welcome">
-            <div class="welcome-mark" aria-hidden="true">여</div>
-            <h1>Markdown을<br />읽는 여백.</h1>
-            <p class="welcome-copy">파일은 이 브라우저 안에서만 읽습니다. 책 폴더를 열면 Markdown에 적힌 이미지 링크를 따라 그림까지 표시합니다.</p>
-            <div class="welcome-actions">
-              <button id="welcome-folder" class="primary-button" type="button">책 폴더 열기</button>
-              <button id="welcome-open" class="quiet-button" type="button">Markdown 파일만 열기</button>
-            </div>
-            <p class="file-hint">폴더나 파일을 이 창에 끌어다 놓아도 됩니다.</p>
+            <p class="welcome-msg">우상단 버튼으로 폴더나 파일을 열어주세요</p>
           </div>
 
           <div id="reader-view" class="reader-view" hidden>
@@ -144,7 +139,7 @@
       <button class="swatch hl-blue" type="button" data-color="blue" aria-label="파랑 형광펜" title="파랑"></button>
       <button class="swatch hl-pink" type="button" data-color="pink" aria-label="분홍 형광펜" title="분홍"></button>
       <button id="hl-bar-memo" class="hl-action" type="button" title="메모 (M)">메모</button>
-      <button id="hl-bar-ask" class="hl-action ask" type="button" title="AI에게 묻기 (A)">AI에게 묻기</button>
+      <button id="hl-bar-ask" class="hl-action ask" type="button" title="AI에게 묻기 (A)">AI</button>
       <button id="hl-bar-copy" class="hl-action" type="button">복사</button>
       <button id="hl-bar-delete" class="hl-action" type="button" hidden>삭제</button>
     </div>

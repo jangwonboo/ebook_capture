@@ -200,3 +200,18 @@ def test_aladin_web_profile_turns_pages_with_wheel() -> None:
     apply_reader_profile(cfg, "aladin_web")
     assert cfg.next_key == "wheeldown"
     assert cfg.reader_focus_clicks == 0
+
+
+def test_aladin_pdf_profile_turns_pages_with_arrow_click() -> None:
+    """PDF-type books in the Aladin web viewer ignore keys and the wheel (2026-11-25)."""
+    from core.windows_util import click_point_for_key
+
+    cfg = CaptureConfig(title="t", base_dir="/x")
+    apply_reader_profile(cfg, "aladin_pdf")
+    assert click_point_for_key(cfg.next_key) == (0.965, 0.527)
+    assert cfg.reader_focus_clicks == 0
+    assert cfg.page_turn_retries == 2
+    trim = cfg.pdf_trim
+    assert (trim.left, trim.right, trim.top, trim.bottom) == (0.054, 0.054, 0.155, 0.098)
+    # The right-edge arrow must lie outside the kept page area.
+    assert 0.965 > 1.0 - trim.right

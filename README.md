@@ -1,6 +1,6 @@
 # ebook_capture
 
-전자책 리더 화면을 연속 캡처해 **PNG**, **이미지 PDF**, **OCR Markdown**을 만들고, 만든 Markdown을 웹 리더 **여백**으로 읽는 도구입니다. 캡처는 CLI와 PyQt5 GUI, 리더는 설치 없는 브라우저 앱입니다.
+전자책 리더 화면을 연속 캡처해 **PNG**, **이미지 PDF**, **OCR Markdown**을 만들고, 만든 Markdown을 웹 리더 **Markdown Reader**로 읽는 도구입니다. 캡처는 CLI와 PyQt5 GUI, 리더는 설치 없는 브라우저 앱입니다.
 
 ## 문서
 
@@ -52,7 +52,7 @@ reader_profiles.jsonc          전자책 뷰어별 동작 (키, 클릭, delay, p
 ocr_typos.txt                  OCR 오타 사전 (공통)
 .env.example                   API 키 예시
 
-reader/                        웹 리더 '여백' (index.html, app.js, notes.js, styles.css, 문서)
+reader/                        웹 리더 Markdown Reader (index.html, app.js, notes.js, styles.css, 문서)
 docs/                          USAGE · ARCHITECTURE · CONTEXT · HISTORY
 
 pyproject.toml, uv.lock, requirements.txt

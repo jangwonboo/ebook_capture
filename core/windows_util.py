@@ -291,6 +291,46 @@ def wheel_notches_for_key(key: str) -> int:
     return _WHEEL_NOTCHES_BY_KEY.get(str(key or "").strip().lower(), 0)
 
 
+def click_point_for_key(key: str) -> tuple[float, float] | None:
+    """``(x_ratio, y_ratio)`` for a ``click:X,Y`` pseudo key, else None.
+
+    Ratios are relative to the capture rect (0..1). Readers that ignore both
+    keys and the wheel but page on an on-screen arrow (Aladin PDF viewer) use
+    this, e.g. ``click:0.965,0.527``.
+    """
+    text = str(key or "").strip().lower()
+    if not text.startswith("click:"):
+        return None
+    try:
+        x_text, y_text = text[len("click:"):].split(",")
+        x, y = float(x_text), float(y_text)
+    except ValueError:
+        return None
+    if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
+        return None
+    return x, y
+
+
+def _deliver_click_to_rect(
+    capture_rect: tuple[int, int, int, int], point: tuple[float, float]
+) -> tuple[bool, str]:
+    """One left click at ``point`` (ratios of ``capture_rect``); pointer restored after."""
+    import pyautogui
+
+    left, top, width, height = capture_rect
+    if width <= 0 or height <= 0:
+        return False, "click needs a non-empty capture_rect"
+    x = left + int(round(width * point[0]))
+    y = top + int(round(height * point[1]))
+    prev = pyautogui.position()
+    pyautogui.moveTo(x, y)
+    time.sleep(0.05)
+    pyautogui.click(x, y)
+    time.sleep(0.05)
+    pyautogui.moveTo(prev.x, prev.y)
+    return True, f"via=click at=({x},{y}) ratio=({point[0]:.3f},{point[1]:.3f})"
+
+
 def _deliver_wheel_to_rect(
     capture_rect: tuple[int, int, int, int], notches: int
 ) -> tuple[bool, str]:
@@ -620,12 +660,15 @@ def send_page_turn_key(
     ``key`` may also be ``wheeldown`` / ``wheelup``: one mouse-wheel notch over
     the centre of ``capture_rect`` instead of a keystroke. Browser readers that
     ignore keyboard page turns (Aladin web viewer) still page on the wheel.
+    ``click:X,Y`` clicks at those ratios of ``capture_rect`` (an on-screen
+    next-page arrow, Aladin PDF viewer).
     """
     if sys.platform != "win32":
         return False, "not Windows"
     wheel_notches = wheel_notches_for_key(key)
-    vk = None if wheel_notches else _vk_for_key(key)
-    if vk is None and not wheel_notches:
+    click_point = None if wheel_notches else click_point_for_key(key)
+    vk = None if (wheel_notches or click_point) else _vk_for_key(key)
+    if vk is None and not wheel_notches and click_point is None:
         return False, f"unknown key {key!r}"
 
     try:
@@ -659,6 +702,19 @@ def send_page_turn_key(
 
     time.sleep(0.08)
     key_name = str(key).strip().lower()
+    if click_point is not None:
+        if capture_rect is None:
+            return False, "click page turn needs capture_rect"
+        ok, via = _deliver_click_to_rect(capture_rect, click_point)
+        parts = [
+            f"top=0x{top_hwnd:x}",
+            f"foreground={foreground_window_title()!r}",
+            "delivery='click'",
+        ]
+        if focus_note:
+            parts.append(focus_note)
+        parts.append(via)
+        return ok, "; ".join(parts)
     if wheel_notches:
         if capture_rect is None:
             return False, "wheel page turn needs capture_rect"

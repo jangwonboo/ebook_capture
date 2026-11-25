@@ -291,6 +291,30 @@ def wheel_notches_for_key(key: str) -> int:
     return _WHEEL_NOTCHES_BY_KEY.get(str(key or "").strip().lower(), 0)
 
 
+def is_click_key(key: str) -> bool:
+    return str(key or "").strip().lower() == "click"
+
+
+def _deliver_click_to_rect(
+    capture_rect: tuple[int, int, int, int], x_ratio: float, y_ratio: float
+) -> tuple[bool, str]:
+    """One left click at the given ratios of ``capture_rect``; pointer restored after."""
+    import pyautogui
+
+    left, top, width, height = capture_rect
+    if width <= 0 or height <= 0:
+        return False, "click needs a non-empty capture_rect"
+    x = left + int(width * max(0.0, min(float(x_ratio), 1.0)))
+    y = top + int(height * max(0.0, min(float(y_ratio), 1.0)))
+    prev = pyautogui.position()
+    pyautogui.moveTo(x, y)
+    time.sleep(0.05)
+    pyautogui.click(x, y)
+    time.sleep(0.05)
+    pyautogui.moveTo(prev.x, prev.y)
+    return True, f"via=click at=({x},{y})"
+
+
 def _deliver_wheel_to_rect(
     capture_rect: tuple[int, int, int, int], notches: int
 ) -> tuple[bool, str]:
@@ -614,8 +638,14 @@ def send_page_turn_key(
     capture_rect: tuple[int, int, int, int] | None = None,
     reader_focus_clicks: int = 2,
     key_delivery: str = "auto",
+    click_x_ratio: float = 0.97,
+    click_y_ratio: float = 0.5,
 ) -> tuple[bool, str]:
     """Activate window, optional focus clicks, then send ``key``.
+
+    ``key`` may be ``click``: one left click at (``click_x_ratio``,
+    ``click_y_ratio``) of ``capture_rect`` (web readers that page on a tap in
+    the right page zone, e.g. the Aladin PDF viewer).
 
     ``key`` may also be ``wheeldown`` / ``wheelup``: one mouse-wheel notch over
     the centre of ``capture_rect`` instead of a keystroke. Browser readers that
@@ -624,8 +654,9 @@ def send_page_turn_key(
     if sys.platform != "win32":
         return False, "not Windows"
     wheel_notches = wheel_notches_for_key(key)
-    vk = None if wheel_notches else _vk_for_key(key)
-    if vk is None and not wheel_notches:
+    is_click = is_click_key(key)
+    vk = None if (wheel_notches or is_click) else _vk_for_key(key)
+    if vk is None and not wheel_notches and not is_click:
         return False, f"unknown key {key!r}"
 
     try:
@@ -659,6 +690,13 @@ def send_page_turn_key(
 
     time.sleep(0.08)
     key_name = str(key).strip().lower()
+    if is_click:
+        if capture_rect is None:
+            return False, "click page turn needs capture_rect"
+        ok, via = _deliver_click_to_rect(capture_rect, click_x_ratio, click_y_ratio)
+        return ok, "; ".join(
+            [f"top=0x{top_hwnd:x}", f"foreground={foreground_window_title()!r}", "delivery='click'", via]
+        )
     if wheel_notches:
         if capture_rect is None:
             return False, "wheel page turn needs capture_rect"

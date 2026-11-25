@@ -560,17 +560,22 @@ def chunks_to_sections(
                 after_figure=prev_type in DROP_TYPES or bool(chunk.get("images")),
             )
             if kind is not None:
-                if (
-                    kind != "title"
-                    and sections
-                    and sections[-1]["type"] == "title"
-                    and chapter_marker_in_text(sections[-1]["text"])
-                ):
+                if kind != "title" and _follows_chapter_label(sections):
                     kind = "title"  # the heading right after a "N장" label is the chapter title
                 sections.append({"type": kind, "text": text})
             prev_type = block_type
             continue
         section_type = TYPE_MAP.get(block_type, "body")
+        if (
+            section_type == "body"
+            and chapter_marker_in_text(html_to_text(html).strip())
+            and not any(s["type"] not in ("header", "page_number", "figure") for s in sections)
+        ):
+            # "4장" set as plain Text at the top of a part-opening page: the
+            # chapter label; the heading that follows becomes the chapter title.
+            sections.append({"type": "title", "text": html_to_text(html).strip()})
+            prev_type = block_type
+            continue
         if section_type == "body" and PRE_RE.match(html):
             section_type = "code"  # code listings arrive as Text wrapped in <pre>
         elif section_type == "body" and RUNNING_HEAD_RE.match(html_to_text(html).strip()):
@@ -640,17 +645,29 @@ def _opens_chapter(
     return True
 
 
+def _follows_chapter_label(sections: list[dict[str, str]]) -> bool:
+    """True when the last non-figure section is a bare "N장" chapter label
+    (an ornament picture may sit between the label and the chapter title)."""
+    from core.section_normalize import chapter_marker_in_text
+
+    for sec in reversed(sections):
+        if sec["type"] == "figure":
+            continue
+        return sec["type"] == "title" and chapter_marker_in_text(sec["text"])
+    return False
+
+
 def _demote_stray_chapter_labels(sections: list[dict[str, str]]) -> list[dict[str, str]]:
     """A bare "N장" title is a chapter opener only when the chapter title
-    follows it. On its own (a screenshot label in the front matter, a cross
-    reference set large) it is plain text."""
+    follows it (figures in between are skipped). On its own (a screenshot
+    label in the front matter, a cross reference set large) it is plain text."""
     from core.section_normalize import chapter_marker_in_text
 
     out = list(sections)
     for i, sec in enumerate(out):
         if sec["type"] != "title" or not chapter_marker_in_text(sec["text"]):
             continue
-        nxt = out[i + 1] if i + 1 < len(out) else None
+        nxt = next((s for s in out[i + 1 :] if s["type"] != "figure"), None)
         # Last block on the page: the title may sit on the next page (a label
         # alone on a part-opening page), so it is left as it is.
         if nxt is not None and nxt["type"] != "title":

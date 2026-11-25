@@ -184,9 +184,11 @@ def _send_page_turn_key(cfg: CaptureConfig, progress: ProgressFn | None) -> None
 
     if cfg.capture_mode == CAPTURE_MANUAL:
         notches = wu.wheel_notches_for_key(cfg.next_key)
+        l, t, w, h = cfg.rect.as_tuple()
         if notches:
-            l, t, w, h = cfg.rect.as_tuple()
             pyautogui.scroll(notches, l + w // 2, t + h // 2)
+        elif wu.is_click_key(cfg.next_key):
+            pyautogui.click(l + int(w * cfg.next_click_x_ratio), t + int(h * cfg.next_click_y_ratio))
         else:
             pyautogui.press(cfg.next_key)
         return
@@ -203,6 +205,8 @@ def _send_page_turn_key(cfg: CaptureConfig, progress: ProgressFn | None) -> None
             capture_rect=(left, top, w, h),
             reader_focus_clicks=0,
             key_delivery=cfg.key_delivery,
+            click_x_ratio=cfg.next_click_x_ratio,
+            click_y_ratio=cfg.next_click_y_ratio,
         )
         _emit(progress, f"TARGET_KEY_SENT key={cfg.next_key!r} ok={ok} {detail}")
         if ok or attempt == attempts:

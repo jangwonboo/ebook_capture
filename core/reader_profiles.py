@@ -56,6 +56,8 @@ _OVERRIDE_FIELDS = (
     "settle_stable_sec",
     "settle_max_sec",
     "page_turn_retries",
+    "next_click_x_ratio",
+    "next_click_y_ratio",
 )
 
 
@@ -93,6 +95,9 @@ class ReaderProfile:
     settle_stable_sec: float | None = None
     settle_max_sec: float | None = None
     page_turn_retries: int | None = None
+    # next_key="click" target inside the capture rect (ratios).
+    next_click_x_ratio: float | None = None
+    next_click_y_ratio: float | None = None
 
     def apply_to(self, cfg: CaptureConfig) -> list[str]:
         """Apply set (non-None) fields onto ``cfg``; return human-readable notes."""
@@ -279,6 +284,30 @@ _BUILTIN_PROFILES: tuple[ReaderProfile, ...] = (
             "the page toggles the menu overlay. Pick browser tab title in GUI/config."
         ),
         next_key="wheeldown",
+        key_delivery=KEY_DELIVERY_PYAUTOGUI,
+        **{
+            **_proven_capture_defaults(
+                PdfTrim(
+                    left=0.0,
+                    right=0.0,
+                    top=_ALADIN_WEB_TOP_BROWSER_UI_RATIO,
+                    bottom=_ALADIN_WEB_BOTTOM_FOOTER_RATIO,
+                )
+            ),
+            "reader_focus_clicks": 0,
+        },
+    ),
+    ReaderProfile(
+        name="aladin_web_pdf",
+        label="Aladin web viewer, PDF book (browser)",
+        note=(
+            "pdfViewer ignores keys and the wheel (2026-11-25, Chrome); a click in "
+            "the right page zone turns the page. No focus clicks. Same browser "
+            "trim as aladin_web. Pick browser tab title in GUI/config."
+        ),
+        next_key="click",
+        next_click_x_ratio=0.97,
+        next_click_y_ratio=0.5,
         key_delivery=KEY_DELIVERY_PYAUTOGUI,
         **{
             **_proven_capture_defaults(

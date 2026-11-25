@@ -254,3 +254,19 @@ python -m ebook_capture run --config default_config.jsonc --reader kindle_app --
 - 결과: `D:\ebook\비트겐슈타인\비트겐슈타인.md` (233쪽, 장 6개, h2 7 / h3 164), `*.ocr.json` 233개, `_ocr.txt`, `_structure.json`, `_typo_fixes.txt`(교정 0).
 - 첫 실행에서 6쪽(77, 98, 132, 179, 201, 203)이 `Expecting ',' delimiter` JSON 파싱 오류로 실패. 모델이 본문의 큰따옴표를 이스케이프 없이 JSON 문자열 안에 그대로 넣은 것이 원인이고, 98·132쪽은 재시도해도 같은 위치에서 반복됐다.
 - 조치: `google_ocr._extract_json_object`에 마지막 단계 복구(`_repair_json_strings`: 문자열 안의 맨 큰따옴표·원시 줄바꿈 이스케이프)를 넣고, `anthropic_ocr`는 `JSONDecodeError`도 재시도 대상으로 바꿨다. 회귀 테스트 `test_extract_json_object_repairs_bare_quotes_and_newlines`. 그 뒤 `--text` 재실행으로 남은 쪽이 모두 통과했다.
+
+### Datalab 재OCR (2026-11-24 20:50)
+
+- 명령: `--text --ocr-engine datalab --ocr-workers 6 --force-phase ocr`. 233쪽 중 51쪽이 429로 실패해 `--ocr-workers 1`로 재개. 주의: 실패한 쪽의 이전 엔진 `.ocr.json`이 남아 있으면 resume이 "Nothing to do"로 끝나므로 그 쪽 파일을 지우고 재개해야 한다.
+- Claude Vision 결과 보관: `비트겐슈타인_anthropic.md`, `비트겐슈타인_anthropic_ocr.txt`, `tmp_anthropic_ocr/`.
+- 첫 조립은 장 1개(h2 2, h3 51)로 잘못 묶였다. 원인 2가지: (1) 장 표지 페이지 맨 앞에 Chrome 탭 텍스트·러닝헤드가 `header`로 붙어 `leading_titles`가 제목 수집을 시작도 못 함, (2) 4장은 "4장" 라벨이 SectionHeader가 아닌 Text 블록이라 본문으로 떨어지고, 라벨과 제목 사이 장식 그림(Picture) 때문에 "라벨 다음 제목" 규칙도 안 걸림.
+- 조치: `section_normalize.leading_titles`가 앞쪽 `header`/`page_number`(섹션 번호 제외)를 건너뜀. `datalab_ocr`: 페이지 첫 내용이 "N장" Text이면 title로 승격, 라벨→제목 판정과 `_demote_stray_chapter_labels`가 사이의 figure를 건너뜀(`_follows_chapter_label`). `rebuild_page_structure`로 전 쪽 재구성 후 `assemble_markdown` 재실행 → 장 6개(h2 7, h3 43). 재OCR 비용 0.
+
+## 10. 알라딘 웹뷰어 PDF 책 캡처 (2026-11-25)
+
+- 대상: Chrome `webviewer.ebook.aladin.co.kr/pdfViewer/...` (ePub 뷰어와 다른 뷰어). 책: 스마트스토어+쿠팡, 354쪽. 출력 `D:\ebook\스마트스토어+쿠팡\스마트스토어+쿠팡.pdf`.
+- 넘김: 키보드·휠 모두 무시. **메뉴가 닫힌 상태에서 오른쪽 여백(0.97, 0.5) 클릭**이 한 쪽 넘김, 왼쪽 여백(0.03, 0.5)이 이전 쪽. 본문을 클릭하면 메뉴가 열리고, 메뉴가 열린 채 클릭하면 하단 슬라이더를 건드려 임의 쪽으로 튄다(탐색 중 120→133→14 경험). 캡처 루프는 본문을 클릭하지 않으므로 안전.
+- 조치: `next_key="click"` 의사 키 + `next_click_x_ratio`/`next_click_y_ratio` 설정(`windows_util._deliver_click_to_rect`), 프로필 `aladin_web_pdf`(클릭 넘김, 포커스 클릭 0, 브라우저 여백은 aladin_web과 동일), GUI 콤보 "Click (next zone)".
+- 검증: 354쪽 캡처, 1/100/200/354쪽 뷰어 카운터 순서 일치.
+- 책 영역 크롭: `pdf_auto_crop`은 흰 뷰어 배경 위 흰 페이지라 좌우 윤곽을 못 잡고(left 0 / right 1.0) 프로필 `pdf_trim`까지 덮어써 Chrome 바가 되살아남 → 쓰지 말 것. 표지 PNG(1278x2159)에서 페이지 상자를 직접 측정: x 70~1207, y 363~1917 → `pdf_trim` left/right 0.054, top 0.167, bottom 0.111. 프로필이 책 config의 `pdf_trim`을 덮어쓰므로 **reader_profile 없는** 책 config(`tmp/ss_book_config.json`)로 `--force-phase pdf --no-pdf-auto-crop` 재조립. 결과 1140x1558, 본문만 남음.
+- 주의: `--force-phase pdf` 재조립에도 `--pages N`(또는 config `n_pages`)이 필요하다. 빠뜨리면 기본 1쪽만 조립해 PDF가 1쪽짜리로 덮인다(한 번 겪음).

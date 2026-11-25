@@ -158,12 +158,28 @@ def prepare_page_sections(sections: list[SectionBlock]) -> list[SectionBlock]:
 
 
 def leading_titles(sections: list[SectionBlock]) -> tuple[list[str], list[SectionBlock]]:
+    """Titles at the top of the page.
+
+    Page furniture ahead of them (a running head, the browser tab strip of a
+    web-reader capture, a page number) is not content and does not end the
+    title run: ``prepare_page_sections`` drops it anyway, so the title count
+    still lines up with the prepared blocks. A bare section number header
+    ("03.") stays, because it is merged with the title that follows it.
+    """
     titles: list[str] = []
     rest: list[SectionBlock] = []
     in_titles = True
     for section in sections:
         if in_titles and section.type == "title":
             titles.append(section.text)
+            continue
+        if (
+            in_titles
+            and not titles
+            and section.type in SKIP_ASSEMBLY_TYPES
+            and not SECTION_NUM_RE.match(section.text.strip())
+        ):
+            rest.append(section)
             continue
         in_titles = False
         rest.append(section)

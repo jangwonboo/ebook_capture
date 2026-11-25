@@ -58,6 +58,7 @@ NEXT_KEY_ITEMS = (
     ("Page Down", "pagedown"),
     ("Wheel Down", "wheeldown"),
     ("Wheel Up", "wheelup"),
+    ("Click (next zone)", "click"),
     ("Page Up", "pageup"),
     ("Right", "right"),
     ("Left", "left"),

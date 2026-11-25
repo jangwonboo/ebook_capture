@@ -312,6 +312,10 @@ class CaptureConfig:
     # window on. -1 = primary. Enumerate with the ``monitors`` CLI command.
     capture_monitor: int = -1
     next_key: str = "pagedown"
+    # next_key="click": one click at this point of the capture rect (ratios).
+    # Web readers that page on a tap in the right page zone (Aladin PDF viewer).
+    next_click_x_ratio: float = 0.97
+    next_click_y_ratio: float = 0.5
     # Clicks on the page before each capture: they focus the reader and let its
     # hover overlay (page arrows, toolbar) appear and fade before the screenshot.
     reader_focus_clicks: int = 2
@@ -631,6 +635,8 @@ class CaptureConfig:
             capture_scale=float(data.get("capture_scale", 1.0)),
             capture_monitor=int(data.get("capture_monitor", -1)),
             next_key=str(data.get("next_key", "pagedown")),
+            next_click_x_ratio=float(data.get("next_click_x_ratio", 0.97)),
+            next_click_y_ratio=float(data.get("next_click_y_ratio", 0.5)),
             reader_focus_clicks=int(data.get("reader_focus_clicks", 2)),
             reader_focus_x_ratio=float(data.get("reader_focus_x_ratio", 0.5)),
             reader_focus_y_ratio=float(data.get("reader_focus_y_ratio", 0.5)),

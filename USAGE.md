@@ -122,7 +122,8 @@ python -m ebook_capture run --title Book --base-dir E:\ebook --text --input-pdf 
 | `kindle_app` | Kindle 데스크톱 (**검증 기준선**) | right / sendinput / 2@중앙 |
 | `kindle_cloud` | Kindle Cloud Reader (브라우저) | right / pyautogui / 2@중앙 |
 | `aladin_app` | 알라딘 ebook 앱 | pagedown / sendinput / 2@중앙 |
-| `aladin_web` | 알라딘 웹 뷰어 (Chrome, 2026-11-24 검증) | **wheeldown** (휠 1칸) / pyautogui / 0 (본문 클릭은 메뉴 토글) |
+| `aladin_web` | 알라딘 웹 뷰어, ePub (Chrome, 2026-11-24 검증) | **wheeldown** (휠 1칸) / pyautogui / 0 (본문 클릭은 메뉴 토글) |
+| `aladin_web_pdf` | 알라딘 웹 뷰어, PDF 책 (Chrome, 2026-11-25 검증) | **click** (오른쪽 페이지 영역 0.97, 0.5 클릭; 키·휠 무시) / pyautogui / 0 |
 | `rdp_full` | 원격 데스크톱(mstsc) 창 안의 리더 (client 영역 전체) | right / sendinput / 0 (API 포그라운드) |
 
 `rdp_full`은 다른 프로필과 루프가 다릅니다. 원격 리더는 세션 안에서 전체 화면으로 띄우고,
@@ -223,7 +224,7 @@ python -m ebook_capture run --config default_config.jsonc --reader kindle_app --
 | 옵션 | 의미 |
 |------|------|
 | `--images` / `--pdf` / `--text` | 출력 타입 (하나만) |
-| `--next-key` | 넘김 키. `pagedown`·`right` 등 키 이름 또는 `wheeldown`/`wheelup` (캡처 영역 중앙에서 휠 1칸, 키 입력을 무시하는 웹 뷰어용) |
+| `--next-key` | 넘김 키. `pagedown`·`right` 등 키 이름, `wheeldown`/`wheelup` (캡처 영역 중앙에서 휠 1칸), 또는 `click` (캡처 영역의 `next_click_x_ratio`, `next_click_y_ratio` 지점을 1회 클릭; 키·휠을 무시하는 웹 뷰어용) |
 | `--output images\|pdf\|text` | 위와 동일 |
 | `--style full\|prose\|raw` | Markdown 스타일 (`--text`) |
 | `-y`, `--yes` | 확인 생략 |

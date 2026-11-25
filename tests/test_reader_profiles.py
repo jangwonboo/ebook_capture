@@ -194,3 +194,13 @@ def test_aladin_web_profile_turns_pages_with_wheel() -> None:
     apply_reader_profile(cfg, "aladin_web")
     assert cfg.next_key == "wheeldown"
     assert cfg.reader_focus_clicks == 0
+
+
+def test_aladin_web_pdf_profile_turns_pages_with_click() -> None:
+    """The Aladin PDF web viewer ignores keys and the wheel (2026-11-25, Chrome)."""
+    cfg = CaptureConfig(title="t", base_dir="/x")
+    apply_reader_profile(cfg, "aladin_web_pdf")
+    assert cfg.next_key == "click"
+    assert (cfg.next_click_x_ratio, cfg.next_click_y_ratio) == (0.97, 0.5)
+    assert cfg.reader_focus_clicks == 0
+    assert cfg.pdf_trim.top == 0.058 and cfg.pdf_trim.bottom == 0.04

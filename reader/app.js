@@ -28,13 +28,16 @@ const Yeobaek = (() => {
 
   /** Markdown text -> flat heading nodes, each holding the blocks that follow its heading. */
   function parseNodes(text) {
-    const source = text.replace(/^﻿/, '').replace(/\r\n?/g, '\n')
-      .replace(/^---\n[\s\S]*?\n---[ \t]*(\n|$)/, ''); // front matter only at the very start
+    const plainText = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+    const frontMatter = /^---\n[\s\S]*?\n---[ \t]*(\n|$)/.exec(plainText); // front matter only at the very start
+    const source = frontMatter ? plainText.slice(frontMatter[0].length) : plainText;
+    const lineBase = frontMatter ? frontMatter[0].split('\n').length - 1 : 0;
+    let lineNo = 0;
     const nodes = [];
     let node = null; let target = null; let open = null; let code = null;
 
     const startNode = (level, title) => {
-      node = { level, title, blocks: [], pages: '' };
+      node = { level, title, blocks: [], pages: '', line: lineBase + lineNo };
       nodes.push(node); target = node.blocks;
     };
     const ensure = () => { if (!node) startNode(PAGE_LEVEL, '처음'); };
@@ -50,7 +53,9 @@ const Yeobaek = (() => {
       open = null;
     };
 
-    for (const raw of source.split('\n')) {
+    const sourceLines = source.split('\n');
+    for (lineNo = 0; lineNo < sourceLines.length; lineNo += 1) {
+      const raw = sourceLines[lineNo];
       if (code) {
         if (/^\s*(```|~~~)/.test(raw)) { ensure(); target.push({ type: 'code', text: code.join('\n') }); code = null; } else code.push(raw);
         continue;
@@ -239,6 +244,12 @@ const Yeobaek = (() => {
         n.pageIndex = pages.length - 1; n.isPage = true;
       } else { page.inline.push(n); n.pageIndex = pages.length - 1; }
     });
+    // Source lines of each screen: from its heading to the next heading at screen level or above.
+    const breaks = nodes.filter((n) => n.level <= PAGE_LEVEL).map((n) => n.line).sort((a, b) => a - b);
+    pages.forEach((p) => {
+      p.start = p.node.line;
+      p.end = breaks.find((line) => line > p.start) ?? Infinity;
+    });
     // A heading with no text of its own (e.g. "Part 1") opens the first screen below it.
     let following = pages.length - 1;
     for (let i = nodes.length - 1; i >= 0; i -= 1) {
@@ -269,11 +280,12 @@ if (typeof document !== 'undefined') (() => {
     savedList: $('#saved-list'), savedCount: $('#saved-count'), clearSaved: $('#clear-saved-button'),
     welcome: $('#welcome'), readerView: $('#reader-view'), crumb: $('#crumb'), progress: $('#progress-label'), progressBar: $('#progress-bar'),
     bookmark: $('#bookmark-button'), scroll: $('#scroll'), content: $('#content'), prev: $('#prev-button'), next: $('#next-button'),
-    fontDown: $('#font-down'), fontUp: $('#font-up'), theme: $('#theme-button'), toast: $('#toast'), drop: $('#drop-zone'),
+    fontDown: $('#font-down'), fontUp: $('#font-up'), measureDown: $('#measure-down'), measureUp: $('#measure-up'),
+    notesGrip: $('#notes-grip'), notesPanel: $('#notes-panel'), theme: $('#theme-button'), toast: $('#toast'), drop: $('#drop-zone'),
   };
   const state = {
     book: null, bookId: '', page: -1, activeId: '', open: new Set(), read: new Set(), saved: [],
-    files: new Map(), names: new Map(), urls: new Map(), baseDir: '', dir: null, sourceName: '', spyLockUntil: 0, toastTimer: null, font: 12,
+    files: new Map(), names: new Map(), urls: new Map(), baseDir: '', dir: null, sourceName: '', spyLockUntil: 0, toastTimer: null, font: 14, measure: 70, measureUsed: 70,
   };
   const narrow = window.matchMedia('(max-width:720px)');
   // notes.js (annotations, notes file, AI) plugs in here; the reader works without it.
@@ -569,23 +581,93 @@ if (typeof document !== 'undefined') (() => {
     if (narrow.matches) setDrawer(true);
     else if (document.body.classList.contains('side-collapsed')) toggleSidebar();
   }
+  // Pane widths. The reading area keeps at least MAIN_MIN px between the two panes.
+  const MAIN_MIN = 360; const SIDE_DEFAULT = 290; const NOTES_DEFAULT = 360;
+  const docked = (el) => el && !el.hidden && getComputedStyle(el).position !== 'fixed';
   function setSideWidth(width, persist = true) {
-    const clamped = Math.round(Math.max(200, Math.min(width, 520, window.innerWidth - 320)));
+    const room = window.innerWidth - (docked(els.notesPanel) ? els.notesPanel.offsetWidth : 0) - MAIN_MIN;
+    const clamped = Math.round(Math.max(200, Math.min(width, 560, Math.max(200, room))));
     document.documentElement.style.setProperty('--side-w', `${clamped}px`);
     if (persist) store.set('sideWidth', clamped);
     return clamped;
   }
+  function setNotesWidth(width, persist = true) {
+    const side = docked(els.grip.previousElementSibling) && !document.body.classList.contains('side-collapsed') ? els.grip.previousElementSibling.offsetWidth : 0;
+    const room = window.innerWidth - side - MAIN_MIN;
+    const clamped = Math.round(Math.max(280, Math.min(width, 680, Math.max(280, room))));
+    document.documentElement.style.setProperty('--notes-w', `${clamped}px`);
+    if (persist) store.set('notesWidth', clamped);
+    return clamped;
+  }
+  /**
+   * A drag handle for a pane. The pane follows the pointer by the distance dragged, so pressing
+   * does not make it jump; `grows` is +1 when dragging right widens it (left pane), -1 otherwise.
+   * Arrow keys move it 16px, double-click resets it.
+   */
+  function makeGrip(grip, pane, setWidth, grows, reset) {
+    grip.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault(); grip.setPointerCapture(event.pointerId); grip.classList.add('dragging'); document.body.classList.add('resizing');
+      const x0 = event.clientX; const w0 = pane.offsetWidth;
+      const move = (e) => setWidth(w0 + grows * (e.clientX - x0), false);
+      const up = (e) => {
+        grip.classList.remove('dragging'); document.body.classList.remove('resizing');
+        grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', up); grip.removeEventListener('pointercancel', up);
+        setWidth(w0 + grows * (e.clientX - x0), true);
+      };
+      grip.addEventListener('pointermove', move); grip.addEventListener('pointerup', up); grip.addEventListener('pointercancel', up);
+    });
+    grip.addEventListener('dblclick', reset);
+    grip.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault(); event.stopPropagation();
+      setWidth(pane.offsetWidth + grows * (event.key === 'ArrowRight' ? 16 : -16));
+    });
+  }
 
   /* ---------- Reading settings ---------- */
 
-  // Text size in points for the body, the left panes and the notes panel; menus stay at 12pt.
-  const FONT_MIN = 9; const FONT_MAX = 20; const FONT_DEFAULT = 12;
+  // Body text size in points (가−/가+ change only this); everything else stays at 12pt.
+  const FONT_MIN = 9; const FONT_MAX = 24; const FONT_DEFAULT = 14;
   function setFont(size, announce = true) {
     state.font = Math.max(FONT_MIN, Math.min(size, FONT_MAX));
     document.documentElement.style.setProperty('--reader-size', `${state.font}pt`);
     els.fontDown.disabled = state.font <= FONT_MIN; els.fontUp.disabled = state.font >= FONT_MAX;
-    store.set('fontPt', state.font);
+    store.set('bodyPt', state.font);
+    applyMeasure();
     if (announce) notify(`글자 크기 ${state.font}pt`);
+  }
+
+  // Paragraph width: the text column's share of the reading area, in 10% steps (default 70%).
+  // The range follows the reading area and the body size so a line holds LINE_MIN_EM to LINE_MAX_EM
+  // characters (Korean text runs about 1em per character), within 30-100%.
+  const MEASURE_DEFAULT = 70; const LINE_MIN_EM = 20; const LINE_MAX_EM = 50;
+  function measureLimits() {
+    const cs = getComputedStyle(els.scroll);
+    const area = els.scroll.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    if (!(area > 0)) return { lo: 30, hi: 100 };
+    const em = (state.font * 96) / 72;
+    const lo = Math.min(100, Math.max(30, Math.ceil((LINE_MIN_EM * em * 10) / area) * 10));
+    const hi = Math.max(lo, Math.min(100, Math.floor((LINE_MAX_EM * em * 10) / area) * 10));
+    return { lo, hi };
+  }
+  /** Shows the preferred width clamped to what fits now; the preference itself is kept for later. */
+  function applyMeasure() {
+    if (!els.measureDown) return state.measure;
+    const { lo, hi } = measureLimits();
+    state.measureUsed = Math.max(lo, Math.min(state.measure, hi));
+    document.documentElement.style.setProperty('--measure', `${state.measureUsed}%`);
+    els.measureDown.disabled = state.measureUsed <= lo; els.measureUp.disabled = state.measureUsed >= hi;
+    const tip = `${lo}–${hi}%, 지금 ${state.measureUsed}%`;
+    els.measureDown.title = `문단 폭 좁게 ([) · ${tip}`; els.measureUp.title = `문단 폭 넓게 (]) · ${tip}`;
+    return state.measureUsed;
+  }
+  function setMeasure(percent, announce = true) {
+    const { lo, hi } = measureLimits();
+    state.measure = Math.max(lo, Math.min(Math.round(percent / 10) * 10, hi));
+    store.set('measurePct', state.measure);
+    const used = applyMeasure();
+    if (announce) notify(`문단 폭 ${used}%`);
   }
   // Installed fonts are used first; `css` is fetched only as a fallback source for machines without them.
   const FONTS = {
@@ -617,6 +699,7 @@ if (typeof document !== 'undefined') (() => {
 
   function openBook(name, text) {
     const book = parseBook(text, name);
+    state.rawText = text;
     state.book = book; state.bookId = slugify(name.replace(/\.[^.]+$/, ''), 'ebook'); state.sourceName = name;
     state.page = -1; state.activeId = '';
     state.read = new Set(store.get(bookKey('read'), []));
@@ -746,20 +829,12 @@ if (typeof document !== 'undefined') (() => {
     els.sideToggle.setAttribute('aria-expanded', String(!narrow.matches && !document.body.classList.contains('side-collapsed')));
   });
 
-  els.grip.addEventListener('pointerdown', (event) => {
-    event.preventDefault(); els.grip.setPointerCapture(event.pointerId); els.grip.classList.add('dragging');
-    const move = (e) => setSideWidth(e.clientX, false);
-    const up = (e) => {
-      els.grip.classList.remove('dragging'); els.grip.removeEventListener('pointermove', move); els.grip.removeEventListener('pointerup', up);
-      setSideWidth(e.clientX);
-    };
-    els.grip.addEventListener('pointermove', move); els.grip.addEventListener('pointerup', up);
-  });
-  els.grip.addEventListener('keydown', (event) => {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-    event.preventDefault(); event.stopPropagation();
-    setSideWidth(els.grip.previousElementSibling.offsetWidth + (event.key === 'ArrowRight' ? 16 : -16));
-  });
+  makeGrip(els.grip, els.grip.previousElementSibling, setSideWidth, 1, () => { setSideWidth(SIDE_DEFAULT); notify('목차 패널 기본 너비'); });
+  makeGrip(els.notesGrip, els.notesPanel, setNotesWidth, -1, () => { setNotesWidth(NOTES_DEFAULT); notify('주석 패널 기본 너비'); });
+  els.measureDown.addEventListener('click', () => setMeasure(state.measureUsed - 10));
+  els.measureUp.addEventListener('click', () => setMeasure(state.measureUsed + 10));
+  // Pane toggles, drags and window size change the reading area, and so the sensible column width.
+  if (window.ResizeObserver) new ResizeObserver(() => applyMeasure()).observe(els.scroll);
 
   els.tabs.forEach((tab, index) => {
     tab.addEventListener('click', () => switchTab(tab.dataset.tab));
@@ -845,13 +920,15 @@ if (typeof document !== 'undefined') (() => {
 
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && document.body.classList.contains('side-open')) { setDrawer(false); els.sideToggle.focus(); return; }
-    if (event.ctrlKey || event.metaKey || event.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) return;
+    if (event.ctrlKey || event.metaKey || event.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) || event.target.isContentEditable) return;
     if (event.key === '/') { event.preventDefault(); showSidebar(); switchTab('search'); els.search.focus(); return; }
     if (!state.book) return;
     if (event.key === 'ArrowLeft') turn(-1);
     else if (event.key === 'ArrowRight') turn(1);
     else if (event.key === '+' || event.key === '=') setFont(state.font + 1);
     else if (event.key === '-') setFont(state.font - 1);
+    else if (event.key === '[') setMeasure(state.measureUsed - 10);
+    else if (event.key === ']') setMeasure(state.measureUsed + 10);
     else hooks.key(event);
   });
 
@@ -870,13 +947,18 @@ if (typeof document !== 'undefined') (() => {
 
   const savedTheme = store.get('theme', '');
   setTheme(THEMES.includes(savedTheme) ? savedTheme : '');
-  setFont(Number(store.get('fontPt', FONT_DEFAULT)) || FONT_DEFAULT, false);
+  setFont(Number(store.get('bodyPt', FONT_DEFAULT)) || FONT_DEFAULT, false);
   setReaderFont(store.get('fontFamily', 'serif'));
   const savedWidth = Number(store.get('sideWidth', 0)); if (savedWidth) setSideWidth(savedWidth, false);
+  const savedNotes = Number(store.get('notesWidth', 0)); if (savedNotes) setNotesWidth(savedNotes, false);
+  state.measure = Number(store.get('measurePct', MEASURE_DEFAULT)) || MEASURE_DEFAULT; applyMeasure();
   if (store.get('sideCollapsed', false) && !narrow.matches) toggleSidebar();
 
   Yeobaek.reader = {
     state, els, store, hooks, narrow, esc, notify, bookKey, pathOf, goTo, scrollToEl, pageHtml,
     updateProgress, renderSaved, updateBookmarkButton, refreshMeta,
+    /** Source line range [start, end) of a screen in state.rawText (lines split on \n). */
+    pageRange: (index) => { const p = state.book.pages[index]; return { start: p.start, end: p.end }; },
+    reopen: (text) => openBook(state.sourceName, text),
   };
 })();

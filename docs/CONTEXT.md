@@ -71,15 +71,16 @@
    ```
 
    성공 기준: 매 키 `DEBUG_KEY_EFFECT … (page moved)`, 이미지에 툴바·화살표 없음. 실패하면 ARCHITECTURE §12.12 진단 절차. 통과하면 `pdf_trim`을 측정해 프로필에 넣고, `aladin_app` `target_window_title`을 확정
-6. **리더 4단계**: 복습 보기, 장을 다 읽었을 때 칠한 문장으로 질문 만들기, 주석 패널 너비 조절 (SPEC §10)
+6. **리더 편집 모드**: PoC A(Vditor 즉시 렌더링) 완료, 장 편집·블록 단위 저장·원본 보호 동작([reader/EDITOR.md](../reader/EDITOR.md) §13). 다음은 읽기 화면의 수식·HTML 표 렌더링(1단계), Vditor `vendor/` 배치, 문단 도구, 파이프라인 덮어쓰기 보호. 실제 Chrome 폴더 저장·실제 한글 입력 확인 필요
+7. **리더 4단계**: 복습 보기, 장을 다 읽었을 때 칠한 문장으로 질문 만들기, 주석 패널 너비 조절 (SPEC §10)
 
 ### 보류·선택
 
-7. 알라딘 웹 뷰어가 주입 키를 무시하는 원인(물리 키보드는 됨). 휠로 우회 중이라 급하지 않음
-8. 남은 조립 흠: 그림 제목이 본문 중간에 큰 글자로 선 경우 `###`로 남음(권력중독 2건), 차례 쪽 `03 부`/`04 부`가 `###`(마스터링 트랜스포머), 파이프 표 셀의 `\|` 이스케이프가 수식 안에도 들어감
-9. GUI: Reader 콤보가 새 필드(`focus_click_settle_sec`, focus ratio, settle 계열)를 반영하는지, resume 토글
-10. `pipeline.py` mock 테스트, Windows CI
-11. 예전 스모크 폴더 정리: `E:\ebook\kindle_verify_*`
+8. 알라딘 웹 뷰어가 주입 키를 무시하는 원인(물리 키보드는 됨). 휠로 우회 중이라 급하지 않음
+9. 남은 조립 흠: 그림 제목이 본문 중간에 큰 글자로 선 경우 `###`로 남음(권력중독 2건), 차례 쪽 `03 부`/`04 부`가 `###`(마스터링 트랜스포머), 파이프 표 셀의 `\|` 이스케이프가 수식 안에도 들어감
+10. GUI: Reader 콤보가 새 필드(`focus_click_settle_sec`, focus ratio, settle 계열)를 반영하는지, resume 토글
+11. `pipeline.py` mock 테스트, Windows CI
+12. 예전 스모크 폴더 정리: `E:\ebook\kindle_verify_*`
 
 ---
 

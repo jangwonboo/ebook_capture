@@ -259,13 +259,14 @@
       return `<button class="cite" type="button" data-cite="${index}:${i}" title="${esc(cite.quote)}">근거 ${i + 1}${node ? ` · ${esc(node.title)}` : ''}</button>`;
     }).join('');
     const pinned = annotation.pinned === index;
-    const usage = turn.usage ? ` · 입력 ${turn.usage.input}${turn.usage.cached ? ` (캐시 ${turn.usage.cached})` : ''} / 출력 ${turn.usage.output} 토큰` : '';
     return `<div class="turn ai${pinned ? ' pinned' : ''}"><span class="who ai">AI</span><div class="answer">${paragraphs(turn.text)}</div>` +
       `<div class="cites">${cites || '<span class="no-cite">근거 문장 없음 (책 밖의 설명일 수 있음)</span>'}</div>` +
-      `<div class="turn-meta">${esc(MODELS[turn.model] || turn.model || '')} · ${day(turn.at)}${usage}</div>` +
       `<div class="turn-actions"><button class="mini" type="button" data-pin="${index}" aria-pressed="${pinned}">${pinned ? '★ 채택됨' : '☆ 주석으로 채택'}</button>` +
       `<button class="mini" type="button" data-to-memo="${index}">메모로 복사</button></div></div>`;
   }
+
+  // Wrap in quotes unless the passage already starts and ends with them.
+  const quoted = (text) => (/^[“"'‘「『]/.test(text) && /[”"'’」』]$/.test(text) ? text : `“${text}”`);
 
   function cardHtml(annotation) {
     const node = state.book.byId.get(annotation.anchor[0].node);
@@ -273,9 +274,9 @@
     const asking = N.asking.has(annotation.id) || annotation.thread.length > 0 || Boolean(live);
     const presets = aiSettings().presets.map(([label], index) => `<button class="pill" type="button" data-preset="${index}">${esc(label)}</button>`).join('');
     return `<article class="note-card hl-${annotation.color || 'none'}" data-id="${esc(annotation.id)}">` +
-      `<header><button class="quote" type="button" data-go${node && !annotation.lost ? '' : ' disabled'}>“${esc(annotation.quote)}”</button>` +
+      `<header><button class="quote" type="button" data-go${node && !annotation.lost ? '' : ' disabled'}>${esc(quoted(annotation.quote))}</button>` +
       `<button class="remove" type="button" data-remove aria-label="주석 삭제">×</button></header>` +
-      `<div class="where">${annotation.lost ? '원문에서 위치를 찾지 못함' : node ? esc(pathOf(node)) : '원문에서 위치를 찾지 못함'}</div>` +
+      `${annotation.lost || !node ? '<div class="where">원문에서 위치를 찾지 못함</div>' : ''}` +
       `<textarea class="memo" data-memo rows="1" placeholder="메모 · #태그" aria-label="메모">${esc(annotation.note || '')}</textarea>` +
       `<div class="tags">${annotation.tags.map((tag) => `<span>${esc(tag)}</span>`).join(' ')}</div>` +
       `<div class="thread">${annotation.thread.map((turn, index) => turnHtml(annotation, turn, index)).join('')}` +

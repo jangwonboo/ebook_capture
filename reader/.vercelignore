@@ -1,0 +1,7 @@
+# Not deployed: captured books and personal settings must not go to a public address.
+library/*
+config.local.js
+# Not needed to run the app
+*.md
+library.py
+tests/

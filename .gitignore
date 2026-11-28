@@ -11,3 +11,10 @@ certs/
 .pytest_cache/
 # scratch output at the repo root (tests/fixtures/**/tmp stays tracked)
 /tmp/
+
+# reader library: captured books stay local, only the folder README is tracked
+reader/library/*
+!reader/library/README.md
+
+# reader: personal defaults (mail addresses), local only
+reader/config.local.js

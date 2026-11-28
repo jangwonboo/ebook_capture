@@ -285,7 +285,7 @@ if (typeof document !== 'undefined') (() => {
   };
   const state = {
     book: null, bookId: '', page: -1, activeId: '', open: new Set(), read: new Set(), saved: [],
-    files: new Map(), names: new Map(), urls: new Map(), baseDir: '', dir: null, sourceName: '', spyLockUntil: 0, toastTimer: null, font: 14, measure: 70, measureUsed: 70,
+    files: new Map(), names: new Map(), urls: new Map(), baseDir: '', baseUrl: '', dir: null, sourceName: '', spyLockUntil: 0, toastTimer: null, font: 14, measure: 70, measureUsed: 70,
   };
   const narrow = window.matchMedia('(max-width:720px)');
   // notes.js (annotations, notes file, AI) plugs in here; the reader works without it.
@@ -297,6 +297,23 @@ if (typeof document !== 'undefined') (() => {
     set(key, value) { try { localStorage.setItem(`yeobaek:${key}`, JSON.stringify(value)); } catch { /* storage unavailable */ } },
   };
   const bookKey = (suffix) => `book:${state.bookId}:${suffix}`;
+  // Folder handles (library, export target) outlive the page in IndexedDB; localStorage cannot hold them.
+  const handles = (() => {
+    const open = () => new Promise((resolve, reject) => {
+      const req = indexedDB.open('yeobaek', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('handles');
+      req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
+    });
+    const tx = async (mode, work) => {
+      const db = await open();
+      try { return await new Promise((resolve, reject) => { const t = db.transaction('handles', mode); const req = work(t.objectStore('handles')); t.oncomplete = () => resolve(req.result); t.onerror = () => reject(t.error); }); } finally { db.close(); }
+    };
+    return {
+      async get(key) { try { return (await tx('readonly', (s) => s.get(key))) || null; } catch { return null; } },
+      async set(key, handle) { try { await tx('readwrite', (s) => s.put(handle, key)); return true; } catch { return false; } },
+      async remove(key) { try { await tx('readwrite', (s) => s.delete(key)); } catch { /* nothing to remove */ } },
+    };
+  })();
   const notify = (message) => {
     clearTimeout(state.toastTimer); els.toast.textContent = message; els.toast.classList.add('show');
     state.toastTimer = setTimeout(() => els.toast.classList.remove('show'), 2200);
@@ -312,35 +329,71 @@ if (typeof document !== 'undefined') (() => {
 
   /* ---------- Rendering: content ---------- */
 
+  // Set only while exporting (epub.js): turns math into pictures, images into package paths,
+  // in-book links into chapter files, and gives headings ids. The screen never uses it.
+  let exportRender = null;
+  // $$display$$ or $inline$ (no space just inside the dollars, no digit right after the closing one).
+  // A code span is matched first so the dollars inside it are left alone.
+  const MATH_RE = /`[^`]+`|\$\$([\s\S]+?)\$\$|\$(?!\s)((?:\\\$|[^$\n])+?)(?<!\s)\$(?!\d)/g;
+
   function inline(value) {
-    return esc(value)
+    const math = [];
+    if (exportRender) {
+      value = value.replace(MATH_RE, (match, display, text) => {
+        if (match[0] === '`') return match;
+        math.push(exportRender.math(display !== undefined ? display : text, display !== undefined));
+        return `${math.length - 1}`;
+      });
+    }
+    const html = esc(value)
       .replace(/`([^`]+)`/g, '<code>$1</code>')
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
       .replace(/\*([^*\s][^*]*)\*/g, '<em>$1</em>')
       .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, url) => {
         if (/^https?:\/\//i.test(url)) return `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
         const target = url.startsWith('#') && state.book.nodes.find((n) => esc(n.title) === label.replace(/<[^>]+>/g, ''));
-        return target ? `<a href="${hashFor(target)}">${label}</a>` : label;
+        if (!target) return label;
+        return `<a href="${exportRender ? exportRender.link(target) : hashFor(target)}">${label}</a>`;
       });
+    return math.length ? html.replace(/(\d+)/g, (match, k) => math[Number(k)]) : html;
   }
 
-  const normalizePath = (value) => {
+  const normalizePathKeepCase = (value) => {
     const parts = [];
     for (const part of value.replace(/\\/g, '/').split('/')) {
       if (!part || part === '.') continue;
       if (part === '..') parts.pop(); else parts.push(part);
     }
-    return parts.join('/').toLowerCase();
+    return parts.join('/');
   };
+  const normalizePath = (value) => normalizePathKeepCase(value).toLowerCase();
 
   /** Follows a Markdown image link: relative to the Markdown file inside the opened folder, else by file name. */
+  const cleanLink = (src) => { const link = src.split(/[?#]/)[0]; try { return decodeURIComponent(link); } catch { return link; } };
+  const isAbsolute = (link) => /^([a-z]:|[\\/]|file:)/i.test(link);
+  function imageFile(src) {
+    const link = cleanLink(src);
+    return (!isAbsolute(link) && state.files.get(normalizePath(`${state.baseDir}/${link}`))) || state.names.get(normalizePath(link).split('/').pop()) || null;
+  }
+  /** A book opened by address (library on a web server) has no files; its images sit next to the Markdown. */
+  function remoteImageUrl(src) {
+    const link = cleanLink(src);
+    if (!state.baseUrl || isAbsolute(link)) return '';
+    return new URL(normalizePathKeepCase(link).split('/').map(encodeURIComponent).join('/'), state.baseUrl).href;
+  }
+  /** Where an image's bytes come from, for exports: an opened file or an address. `key` identifies the image. */
+  function imageSource(src) {
+    if (/^(https?:|data:)/i.test(src)) return null;
+    const file = imageFile(src);
+    if (file) return { key: file, name: file.name, blob: async () => file };
+    const url = remoteImageUrl(src);
+    if (!url) return null;
+    return { key: url, name: cleanLink(src).split('/').pop(), blob: async () => { const res = await fetch(url); if (!res.ok) throw new Error(String(res.status)); return res.blob(); } };
+  }
   function imageUrl(src) {
     if (/^(https?:|data:image\/)/i.test(src)) return src;
-    let link = src.split(/[?#]/)[0];
-    try { link = decodeURIComponent(link); } catch { /* keep the raw link */ }
-    const absolute = /^([a-z]:|[\\/]|file:)/i.test(link);
-    const file = (!absolute && state.files.get(normalizePath(`${state.baseDir}/${link}`))) || state.names.get(normalizePath(link).split('/').pop());
-    if (!file) return '';
+    const file = imageFile(src);
+    if (!file) return remoteImageUrl(src);
     if (!state.urls.has(file)) state.urls.set(file, URL.createObjectURL(file));
     return state.urls.get(file);
   }
@@ -357,6 +410,11 @@ if (typeof document !== 'undefined') (() => {
         return `<div class="table-wrap"><table>${head}<tbody>${body}</tbody></table></div>`;
       }
       case 'image': {
+        if (exportRender) {
+          const path = exportRender.image(block.src);
+          const caption = block.alt && block.alt !== '그림' ? `<figcaption>${esc(block.alt)}</figcaption>` : '';
+          return path ? `<figure><img src="${esc(path)}" alt="${esc(block.alt)}">${caption}</figure>` : '';
+        }
         const url = imageUrl(block.src);
         const caption = block.alt && block.alt !== '그림' ? `<figcaption>${esc(block.alt)}</figcaption>` : '';
         return url
@@ -372,18 +430,25 @@ if (typeof document !== 'undefined') (() => {
     const page = state.book.pages[index]; const node = page.node;
     const kicker = ancestors(node).map((n) => n.title).join(' · ');
     const pageRange = [node, ...page.inline].map((n) => n.pages).find(Boolean);
-    return `<header class="page-head">${kicker ? `<p class="kicker">${esc(kicker)}</p>` : ''}<h2 class="page-title">${esc(node.title)}</h2>` +
+    const idOf = (n) => (exportRender ? ` id="${exportRender.id(n)}"` : '');
+    return `<header class="page-head">${kicker ? `<p class="kicker">${esc(kicker)}</p>` : ''}<h2 class="page-title"${idOf(node)}>${esc(node.title)}</h2>` +
       `${pageRange ? `<p class="source-pages">원문 p.${esc(pageRange)}</p>` : ''}</header>` +
       node.blocks.map(renderBlock).join('') +
       page.inline.map((n) => {
         const tag = n.level <= PAGE_LEVEL + 1 ? 'h3' : 'h4';
-        return `<${tag} data-node="${esc(n.id)}">${esc(n.title)}</${tag}>${n.blocks.map(renderBlock).join('')}`;
+        return `<${tag} data-node="${esc(n.id)}"${idOf(n)}>${esc(n.title)}</${tag}>${n.blocks.map(renderBlock).join('')}`;
       }).join('');
+  }
+  /** One screen's HTML for a package (EPUB): `render` supplies math, image, link and id handling. */
+  function exportPage(index, render) {
+    exportRender = render;
+    try { return pageHtml(index); } finally { exportRender = null; }
   }
 
   function renderPage(index) {
     const { pages } = state.book;
     state.page = index;
+    els.welcome.hidden = true; els.readerView.hidden = false;
     els.content.innerHTML = pageHtml(index);
     const setPager = (button, target) => {
       button.disabled = !target; button.querySelector('span').textContent = target ? target.node.title : '';
@@ -808,10 +873,17 @@ if (typeof document !== 'undefined') (() => {
     const text = await markdown.file.text();
     state.urls.forEach((url) => URL.revokeObjectURL(url));
     state.urls.clear(); state.files.clear(); state.names.clear();
-    state.baseDir = markdown.path.split('/').slice(0, -1).join('/');
+    state.baseDir = markdown.path.split('/').slice(0, -1).join('/'); state.baseUrl = '';
     state.dir = markdown.dir || null; // writable folder handle when the folder was opened through the picker
     addImages(images);
     openBook(markdown.file.name, text);
+  }
+  /** Opens a book by address: `baseUrl` is the folder its image links are relative to. Read-only. */
+  function openRemote(name, text, baseUrl) {
+    state.urls.forEach((url) => URL.revokeObjectURL(url));
+    state.urls.clear(); state.files.clear(); state.names.clear();
+    state.baseDir = ''; state.baseUrl = baseUrl; state.dir = null;
+    openBook(name, text);
   }
 
   /* ---------- Events ---------- */
@@ -922,7 +994,7 @@ if (typeof document !== 'undefined') (() => {
     if (event.key === 'Escape' && document.body.classList.contains('side-open')) { setDrawer(false); els.sideToggle.focus(); return; }
     if (event.ctrlKey || event.metaKey || event.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) || event.target.isContentEditable) return;
     if (event.key === '/') { event.preventDefault(); showSidebar(); switchTab('search'); els.search.focus(); return; }
-    if (!state.book) return;
+    if (!state.book || els.readerView.hidden) return;
     if (event.key === 'ArrowLeft') turn(-1);
     else if (event.key === 'ArrowRight') turn(1);
     else if (event.key === '+' || event.key === '=') setFont(state.font + 1);
@@ -955,7 +1027,8 @@ if (typeof document !== 'undefined') (() => {
   if (store.get('sideCollapsed', false) && !narrow.matches) toggleSidebar();
 
   Yeobaek.reader = {
-    state, els, store, hooks, narrow, esc, notify, bookKey, pathOf, goTo, scrollToEl, pageHtml,
+    state, els, store, hooks, narrow, esc, notify, bookKey, pathOf, goTo, scrollToEl, pageHtml, exportPage, imageFile, imageSource,
+    openEntries, openRemote, MARKDOWN, IMAGE, imageUrl, handles,
     updateProgress, renderSaved, updateBookmarkButton, refreshMeta,
     /** Source line range [start, end) of a screen in state.rawText (lines split on \n). */
     pageRange: (index) => { const p = state.book.pages[index]; return { start: p.start, end: p.end }; },

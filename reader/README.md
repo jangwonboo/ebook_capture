@@ -9,6 +9,20 @@
    - 그림이 보이고, 주석이 책 폴더의 `{title}.notes.json`에 저장됩니다.
    - **파일 열기**나 끌어다 놓기로 열면 그림 없이 읽기만 되고, 주석은 브라우저에만 남습니다. 주석 패널의 "브라우저에만 저장됨"을 누르면 폴더 저장으로 바꿀 수 있습니다.
 
+### 서재에서 고르기
+
+책을 모아 둔 폴더를 한 번 연결해 두면 시작 화면에 책 목록(표지, 제목)이 나오고, 눌러서 엽니다.
+
+1. 책 넣기: `python reader/library.py add "D:\ebook\비트겐슈타인"` — `reader/library/` 아래로 Markdown, 주석 파일, 링크된 그림만 복사합니다
+2. 리더 시작 화면의 **서재 폴더 연결**을 누르고 `reader/library` 폴더를 고릅니다(쓰기 권한 허용). 책을 모아 둔 다른 폴더(예: `D:\ebook`)를 골라도 됩니다
+3. 다음부터는 목록이 바로 나옵니다. 브라우저가 권한을 다시 물으면 **서재 열기**를 누릅니다
+4. 책을 읽다가 상단 **서재** 버튼으로 목록에 돌아옵니다. 목차를 누르면 읽던 책으로 돌아갑니다
+
+- 서재로 연 책은 "폴더 열기"와 같습니다. 그림이 보이고 주석·편집이 책 폴더에 저장됩니다
+- 책으로 치는 것: 연결한 폴더에서 3단계 아래까지의 `.md`. `assets`·`tmp` 폴더, `*.original.md`, `*.notes.md`, `README.md`는 건너뜁니다
+- `library.py add`는 복사입니다. 원래 폴더의 주석 파일과는 따로 갑니다. 한 벌만 두려면 복사하지 말고 원래 폴더를 서재로 연결하세요
+- 웹 서버에 올리면(예: Vercel) 폴더 연결 없이 `library/index.json`의 목록을 보여 줍니다(읽기 전용, 주석은 브라우저에만). 책을 넣거나 뺀 뒤 `python reader/library.py`로 목록을 다시 만듭니다. 캡처한 책은 공개 주소에 그대로 올리면 안 됩니다([KINDLE.md](KINDLE.md) §4.1)
+
 인터넷이 끊겨 있어도 읽기와 주석은 됩니다. 글꼴 일부와 AI 문답만 인터넷이 필요합니다.
 
 ## 화면
@@ -59,6 +73,43 @@
 - "파일 열기"로 연 책은 수정본을 내려받습니다.
 - 편집기는 처음 쓸 때 인터넷에서 불러옵니다(Vditor 4.0.1).
 
+## 내보내기 (Export)
+
+본문 위 **Export** 버튼을 누르면 네 가지가 나옵니다.
+
+| 항목 | 하는 일 |
+| --- | --- |
+| EPUB | `{제목}.epub`을 내려받습니다 |
+| PDF | 책 전체를 A5 쪽으로 조판해 인쇄 창을 엽니다. 대상을 "PDF로 저장"으로 고르면 파일이 됩니다 |
+| To Kindle | EPUB을 내려받고, Kindle 주소로 보낼 Gmail 작성 창을 새 창으로 엽니다(받는 사람과 제목이 채워져 있음). 내려받은 파일을 첨부해 보냅니다. 주소가 없거나 방법을 "Send to Kindle 웹"으로 바꾸면 Amazon의 Send to Kindle 페이지를 엽니다 |
+| To Google Drive | EPUB을 내려받고, 정해 둔 Drive 폴더를 정해 둔 계정으로 새 창에 엽니다. 내려받은 파일을 그 창에 끌어다 놓습니다. PC용 Google Drive 폴더를 골라 두었으면 새 창 없이 그 폴더에 바로 저장합니다 |
+
+웹 페이지는 메일에 파일을 붙이거나 Kindle·Drive에 직접 올릴 수 없어서, To Kindle과 "웹에서 올리기"는 마지막에 첨부하거나 끌어다 놓는 한 번이 남습니다.
+
+To Google Drive 폴더 정하기:
+
+- 기본값은 `reader/config.local.js`의 `drive`에 둡니다: 폴더 주소(`https://drive.google.com/drive/folders/…`, 폴더 ID만 적어도 됨)와 Google 계정
+- 메뉴의 "To Google Drive 설정"에서 바꾸면 그 브라우저에만 저장되고 기본값보다 우선합니다. 같은 창에서 PC용 Google Drive 폴더를 고르거나 지웁니다
+- 폴더 주소를 비우면 내 드라이브를 엽니다
+
+To Kindle 주소 정하기:
+
+- 기본값은 `reader/config.local.js`에 둡니다. `config.example.js`를 복사해 보내는 Gmail 주소와 받는 Kindle 주소를 적으세요. 이 파일은 `.gitignore`에 있어 저장소에 올라가지 않습니다
+- 메뉴의 "To Kindle 설정"에서 바꾸면 그 브라우저에만 저장되고 기본값보다 우선합니다
+- 보내는 주소가 Amazon의 "승인된 개인 문서 이메일 목록"에 있어야 Kindle이 받습니다. Gmail 첨부는 25MB까지입니다
+
+EPUB과 PDF에 공통인 것:
+
+- 목차: 리더의 목차 계층 그대로 들어갑니다. 장 나누기도 리더 화면과 같습니다
+- 수식: `$…$`와 `$$…$$`를 MathJax로 그립니다(EPUB은 SVG 그림 파일, PDF는 벡터). 바꾸지 못한 수식은 원문 글자로 남고 개수를 알려 줍니다
+- 그림: "폴더 열기"나 서재로 연 책만 그림이 들어갑니다. 못 찾은 그림 수를 끝에 알려 줍니다
+- 주석(형광펜·메모)은 들어가지 않습니다
+- 처음 내보낼 때 라이브러리(JSZip, MathJax)와 글꼴을 인터넷에서 받습니다
+
+EPUB: Pretendard(보통·굵게)를 파일에 넣고 기본 글꼴로 지정합니다. 글자 크기와 줄 간격은 단말기 설정을 따릅니다. Send to Kindle로 보내면 Kindle에서 이 글꼴이 나오지 않습니다(변환 과정에서 빠지는 것으로 추정). Kindle에서 Pretendard로 보려면 기기의 `fonts` 폴더에 글꼴 파일을 넣거나 PDF로 보내세요.
+
+PDF: A5, 본문 10.5pt Pretendard. 글꼴이 파일에 들어가므로 어느 기기에서나 같은 모양입니다. 글자 크기는 바꿀 수 없습니다. 인쇄 창의 여백은 "기본값", 배율은 100%로 두세요.
+
 ## 파일
 
 | 파일 | 역할 |
@@ -67,7 +118,14 @@
 | `app.js` | Markdown 해석, 목차, 본문, 검색, 읽기 설정 |
 | `notes.js` | 주석, 주석 파일, AI 문답 |
 | `editor.js` | 편집 모드, 블록 단위 저장, 원본 보호 |
+| `epub.js` | EPUB 만들기 (목차, Pretendard 포함, 수식 SVG) |
+| `export.js` | Export 메뉴: EPUB, PDF, To Kindle, To Google Drive |
+| `config.example.js` | 개인 기본값(To Kindle 주소, Drive 폴더·계정) 예시. `config.local.js`로 복사해 씀 |
+| `library.js` | 서재: 연결한 폴더나 `library/index.json`의 책 목록 |
+| `library.py` | 서재에 책 복사, `library/index.json` 만들기 |
+| `library/` | 서재 폴더. 책은 git에 올리지 않음 |
 | `tests/editor_merge.test.js` | 블록 단위 저장 테스트 (`node reader/tests/editor_merge.test.js`) |
 | `SPEC.md` | 기획·스펙·결정 사항·남은 일 |
 | `EDITOR.md` | 편집 모드 기획과 PoC 결과 |
+| `KINDLE.md` | Kindle Scribe 펜 주석·Vercel 배포 기획 |
 | `PRODUCT.md`, `DESIGN.md` | 제품·디자인 요약 (디자인 도구가 읽는 형식) |

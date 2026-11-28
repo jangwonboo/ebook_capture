@@ -21,6 +21,7 @@
         <span class="brand">Markdown Reader</span>
         <span id="book-title" class="book-title"></span>
         <div class="top-actions">
+          <button id="library-button" class="quiet-button" type="button" title="서재: 책 목록에서 고르기">서재</button>
           <button id="folder-button" class="quiet-button" type="button" title="책 폴더를 열면 Markdown의 이미지 링크를 따라 그림을 표시합니다">폴더 열기</button>
           <button id="open-button" class="quiet-button" type="button">파일 열기</button>
           <select id="font-select" class="font-select" aria-label="본문 글꼴" title="본문 글꼴">
@@ -79,6 +80,16 @@
 
         <main class="main">
           <div id="welcome" class="welcome">
+            <section id="library" class="library" aria-labelledby="library-title" hidden>
+              <div class="library-head">
+                <h2 id="library-title">서재</h2>
+                <span id="library-status" class="library-status"></span>
+                <button id="library-refresh" class="nav-button" type="button" hidden>새로 고침</button>
+                <button id="library-connect" class="nav-button" type="button" hidden>서재 폴더 연결</button>
+              </div>
+              <p id="library-hint" class="library-hint" hidden></p>
+              <div id="library-list" class="library-list"></div>
+            </section>
             <p class="welcome-msg">우상단 버튼으로 폴더나 파일을 열어주세요</p>
           </div>
 
@@ -86,6 +97,17 @@
             <div class="toolbar">
               <nav id="crumb" class="crumb" aria-label="현재 위치"></nav>
               <span id="progress-label" class="progress-label"></span>
+              <div class="menu-wrap">
+                <button id="export-button" class="nav-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="export-menu" title="이 책 내보내기">Export</button>
+                <div id="export-menu" class="menu" role="menu" aria-label="내보내기" hidden>
+                  <button type="button" role="menuitem" data-export="epub"><strong>EPUB</strong><span>전자책 파일로 내려받기</span></button>
+                  <button type="button" role="menuitem" data-export="pdf"><strong>PDF</strong><span>인쇄 창에서 ‘PDF로 저장’</span></button>
+                  <button type="button" role="menuitem" data-export="kindle"><strong>To Kindle</strong><span id="export-kindle-note">EPUB을 내려받고 Send to Kindle 열기</span></button>
+                  <button type="button" role="menuitem" data-export="drive"><strong>To Google Drive</strong><span id="export-drive-note">EPUB을 내려받고 Google Drive 열기</span></button>
+                  <button type="button" role="menuitem" class="minor" data-export="kindle-settings">To Kindle 설정</button>
+                  <button type="button" role="menuitem" class="minor" data-export="drive-settings">To Google Drive 설정</button>
+                </div>
+              </div>
               <button id="edit-toggle" class="nav-button" type="button" aria-pressed="false" title="이 장 편집 (E)">편집</button>
               <div id="edit-controls" class="edit-controls" hidden>
                 <span class="edit-chip">편집 중</span>
@@ -197,12 +219,53 @@
     </dialog>
     <div id="drop-zone" class="drop-zone" aria-hidden="true">파일을 놓아 책을 엽니다</div>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <!-- Personal defaults (mail addresses and the like). The file is optional and never committed. -->
+    <script src="config.local.js" onerror="void 0"></script>
     <script src="app.js"></script>
+    <dialog id="kindle-settings" class="chooser settings" aria-labelledby="kindle-settings-title">
+      <h2 id="kindle-settings-title">To Kindle 설정</h2>
+      <label class="form-row" for="kindle-method">보내는 방법
+        <select id="kindle-method" class="field">
+          <option value="email">메일로 보내기 (Gmail 작성 창)</option>
+          <option value="web">Send to Kindle 웹</option>
+        </select>
+      </label>
+      <label class="form-row" for="kindle-sender">보내는 Gmail 주소 <small>이 계정의 Gmail로 작성 창을 엽니다</small>
+        <input id="kindle-sender" class="field" type="email" autocomplete="off" spellcheck="false" placeholder="name@gmail.com" />
+      </label>
+      <label class="form-row" for="kindle-receiver">받는 Kindle 주소
+        <input id="kindle-receiver" class="field" type="email" autocomplete="off" spellcheck="false" placeholder="name@kindle.com" />
+      </label>
+      <p class="settings-note">보내는 주소는 Amazon의 "승인된 개인 문서 이메일 목록"에 있어야 Kindle이 받습니다. 주소는 이 브라우저에만 저장합니다.</p>
+      <div class="dialog-actions">
+        <button id="kindle-cancel" class="quiet-button" type="button">취소</button>
+        <button id="kindle-save" class="primary-button" type="button">저장</button>
+      </div>
+    </dialog>
+    <dialog id="drive-settings" class="chooser settings" aria-labelledby="drive-settings-title">
+      <h2 id="drive-settings-title">To Google Drive 설정</h2>
+      <label class="form-row" for="drive-folder">Drive 폴더 주소 <small>비우면 내 드라이브를 엽니다</small>
+        <input id="drive-folder" class="field" type="text" autocomplete="off" spellcheck="false" placeholder="https://drive.google.com/drive/folders/…" />
+      </label>
+      <label class="form-row" for="drive-account">Google 계정 <small>이 계정으로 폴더를 엽니다</small>
+        <input id="drive-account" class="field" type="email" autocomplete="off" spellcheck="false" placeholder="name@gmail.com" />
+      </label>
+      <p id="drive-local" class="settings-note"></p>
+      <p class="settings-note"><button id="drive-local-pick" class="text-button" type="button">PC용 Google Drive 폴더 고르기</button> <button id="drive-local-clear" class="text-button" type="button" hidden>PC 폴더 지우기</button></p>
+      <p class="settings-note">PC용 Google Drive가 설치되어 있으면 동기화되는 폴더를 골라 두세요. 그러면 끌어다 놓지 않고 바로 저장합니다. 주소와 계정은 이 브라우저에만 저장합니다.</p>
+      <div class="dialog-actions">
+        <button id="drive-cancel" class="quiet-button" type="button">취소</button>
+        <button id="drive-save" class="primary-button" type="button">저장</button>
+      </div>
+    </dialog>
     <dialog id="edit-ask" class="chooser" aria-labelledby="edit-ask-text">
       <p id="edit-ask-text" class="edit-ask-text"></p>
       <div id="edit-ask-actions" class="dialog-actions"></div>
     </dialog>
     <script src="notes.js"></script>
     <script src="editor.js"></script>
+    <script src="epub.js"></script>
+    <script src="export.js"></script>
+    <script src="library.js"></script>
   </body>
 </html>
